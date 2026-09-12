@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+dist/
+*.egg-info/
+.python-version
+
+# Node
+node_modules/
+dist/
+.cache/
+
+# Rust / Cargo
+target/
+
+# Tauri
+src-tauri/target/
+src-tauri/gen/
+
+# Environment
+.env
+.env.local
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/settings.json
+.idea/
+
+# Temp
+_temp/
+
+# Model weights (download separately)
+backend/models/
