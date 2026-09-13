@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 0.8.0 (2026-09-13, claude sonnet-5)
+
+- Add real hardware-capability detection: memory, free disk, and acceleration backend
+
+  Acceleration detection is a torch-free heuristic (platform/arch for MPS,
+  nvidia-smi/rocm-smi presence for CUDA/ROCm, else CPU) since PyTorch isn't a
+  dependency yet. Should be replaced by torch's own availability checks once
+  a model is chosen and TransformersExtractor exists.
+
 ## Version 0.7.0 (2026-09-13, claude sonnet-5)
 
 - Add the model catalog: entry schema, hardware compatibility, and the picker view

@@ -10,6 +10,19 @@ Example: `2026-09-12_Apple_MacBook-Air_2180-EUR.pdf`
 
 The app processes locally by default, previews all proposals, renames approved originals, and supports Undo. Cloud analysis through OpenRouter is always explicit.
 
+## Progress so far
+
+Written for picking this project back up in a fresh session; update it as work continues so it stays a reliable snapshot rather than trusting conversation history.
+
+- **Milestone 1 — Step 1a done, Step 1b not started.** A bare Tauri shell (`src-tauri/`) spawns the FastAPI worker (`backend/src/invoice_renamer/api/`) as a PyInstaller-packaged sidecar, handing it a per-launch session token and port, waiting for a stdout readiness marker only printed after uvicorn's socket bind actually succeeds (see `api/server.py`'s `_ReadyAnnouncingServer`). Verified end to end on real macOS hardware: the window opens, the worker starts, `/health` responds. Step 1b (bundling the local model + platform OCR into the signed/sandboxed spike build) has not been started, and neither has the PyInstaller-vs-Nuitka / onedir-vs-onefile packaging comparison the plan calls for — today's sidecar binary is a onefile dev/CI convenience build, not the shipping shape.
+- **Milestone 2 — done**, except ZUGFeRD/Factur-X field parsing. `documents/reader.py` extracts per-page text via `pypdf`, routes low-text pages through OCR (`documents/ocr.py`, Tesseract via `pytesseract`, `documents/render.py` for `pypdfium2` rendering), and detects embedded ZUGFeRD/Factur-X XML by standard attachment filename — but only returns it as raw text; parsing it into fields and merging/conflict-checking against visible text is still open. `extraction/models.py` (`InvoiceExtraction`, `Evidence`) and `naming/builder.py` (`build_filename_proposal`) are both done and tested.
+- **Milestone 3 — partially done; model selection is the real blocker for the rest.**
+  - Done and tested: the inference interface (`inference/`: `LanguageModel` protocol, `extract_invoice()` with prompt building and one JSON-repair retry — no real model plugged in yet); `RunMetrics` (`metrics/models.py`, a contract with no production caller yet); the model catalog schema, hardware-compatibility judging, and picker view (`models/catalog.py`, `compatibility.py`, `picker.py` — schema and logic only, catalog contents are test placeholders, not real models); real hardware detection (`models/detection.py`, `psutil`-based memory/disk, a torch-free heuristic for the acceleration backend since PyTorch isn't a dependency yet).
+  - Not started, and blocked on picking a real model: `TransformersExtractor` (an actual local Hugging Face model behind the `LanguageModel` protocol), the download/checksum/resume manager for installing it, a real (non-placeholder) catalog listing actual candidate models, and anything that actually constructs a `RunMetrics` from a real run.
+  - **Start here next**: have the model-selection discussion this plan's "Model selection benchmark" section calls for (which 2-3 small instruct models to shortlist, quantization, what to benchmark against) — it's been deferred repeatedly and nothing else in Milestone 3 can proceed without it.
+- Backend verification (`cd backend`): `uv run pytest` (124 tests as of this writing), `uv run ruff format --check src tests`, `uv run ruff check src tests`, `uv run mypy src` — all green. Running the OCR tests requires `tesseract-ocr` + `tesseract-ocr-deu` installed locally (`brew install tesseract tesseract-lang` on macOS).
+- Milestones 4-6 (desktop workflow, cloud option, release hardening) are untouched.
+
 ## Development environment
 
 - Day-to-day coding and most testing happen in a sandboxed, non-macOS environment (a Linux dev container). Pace favors small, verifiable steps over speed, since this project doubles as a learning exercise.

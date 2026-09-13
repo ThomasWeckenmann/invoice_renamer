@@ -9,6 +9,7 @@ requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.141.1",
     "pillow>=12.3.0",
+    "psutil>=7.2.2",
     "pycountry>=26.2.16",
     "pypdf>=6.18.1",
     "pypdfium2>=5.13.0",
@@ -49,4 +50,5 @@ dev = [
     "pytest>=9.1.1",
     "reportlab>=5.0.1",
     "ruff>=0.16.7",
+    "types-psutil>=7.2.2.20260906",
 ]
