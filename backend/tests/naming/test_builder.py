@@ -1,0 +1,93 @@
+"""Tests for deterministic filename proposal construction."""
+
+from datetime import date
+from decimal import Decimal
+
+from invoice_renamer.extraction.models import InvoiceExtraction
+from invoice_renamer.naming.builder import build_filename_proposal
+
+
+def _extraction(**overrides: object) -> InvoiceExtraction:
+    defaults: dict[str, object] = {
+        "invoice_date": date(2026, 9, 12),
+        "seller": "Apple",
+        "product_summary": "MacBook Air",
+        "gross_total": Decimal("2180"),
+        "currency": "EUR",
+    }
+    defaults.update(overrides)
+    return InvoiceExtraction(**defaults)  # type: ignore[arg-type]
+
+
+def test_full_extraction_produces_expected_filename() -> None:
+    proposal = build_filename_proposal(_extraction())
+
+    assert proposal.proposed_filename == "2026-09-12_Apple_MacBook-Air_2180-EUR.pdf"
+    assert proposal.requires_review is False
+
+
+def test_missing_date_uses_placeholder_and_requires_review() -> None:
+    proposal = build_filename_proposal(_extraction(invoice_date=None))
+
+    assert proposal.proposed_filename.startswith("0000-00-00_")
+    assert proposal.requires_review is True
+
+
+def test_missing_seller_uses_placeholder_and_requires_review() -> None:
+    proposal = build_filename_proposal(_extraction(seller=None))
+
+    assert "_Unknown_" in proposal.proposed_filename
+    assert proposal.requires_review is True
+
+
+def test_missing_currency_uses_placeholder_and_requires_review() -> None:
+    proposal = build_filename_proposal(_extraction(currency=None))
+
+    assert proposal.proposed_filename.endswith("-XXX.pdf")
+    assert proposal.requires_review is True
+
+
+def test_warnings_force_review_even_when_fields_are_complete() -> None:
+    proposal = build_filename_proposal(_extraction(warnings=["low OCR confidence"]))
+
+    assert proposal.requires_review is True
+
+
+def test_german_umlauts_are_transliterated() -> None:
+    proposal = build_filename_proposal(_extraction(seller="Müller & Söhne GmbH"))
+
+    assert "Mueller" in proposal.proposed_filename
+    assert "Soehne" in proposal.proposed_filename
+
+
+def test_amount_rounds_half_up() -> None:
+    proposal = build_filename_proposal(_extraction(gross_total=Decimal("2180.5")))
+
+    assert "_2181-EUR.pdf" == proposal.proposed_filename[-len("_2181-EUR.pdf") :]
+
+
+def test_forbidden_characters_are_stripped() -> None:
+    proposal = build_filename_proposal(_extraction(product_summary='Foo/Bar:Baz*?"<>|'))
+
+    assert "FooBarBaz" in proposal.proposed_filename
+    for forbidden in '/:*?"<>|':
+        assert forbidden not in proposal.proposed_filename
+
+
+def test_whitespace_collapses_to_hyphen() -> None:
+    proposal = build_filename_proposal(_extraction(product_summary="Multi   word   name"))
+
+    assert "Multi-word-name" in proposal.proposed_filename
+
+
+def test_non_german_accents_are_stripped_to_ascii() -> None:
+    proposal = build_filename_proposal(_extraction(seller="Café Français"))
+
+    assert "Cafe-Francais" in proposal.proposed_filename
+
+
+def test_long_product_summary_is_truncated() -> None:
+    proposal = build_filename_proposal(_extraction(product_summary="Word " * 60))
+
+    stem = proposal.proposed_filename.removesuffix(".pdf")
+    assert len(stem) <= 150
