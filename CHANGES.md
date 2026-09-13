@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 0.5.0 (2026-09-13, claude sonnet-5)
+
+- Add the invoice extraction interface: prompting, JSON validation, and one repair retry
+
+  extract_invoice() sits behind a LanguageModel protocol so TransformersExtractor
+  and OpenRouterExtractor can share one parse/validate/repair flow once built.
+  Repair calls repeat the original prompt (generate() has no guaranteed history),
+  and document-level warnings carry through on both the success and fallback paths.
+
 ## Version 0.4.0 (2026-09-13, claude sonnet-5)
 
 - Add the BB-04 OCR adapter: Tesseract-based text recovery for pages without a text layer
