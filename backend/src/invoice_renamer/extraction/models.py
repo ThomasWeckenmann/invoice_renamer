@@ -6,6 +6,8 @@ from enum import Enum
 
 from pydantic import BaseModel, Field, field_validator
 
+from invoice_renamer.extraction.validators import validate_iso4217_currency
+
 
 class Language(str, Enum):
     GERMAN = "de"
@@ -37,11 +39,7 @@ class InvoiceExtraction(BaseModel):
     @field_validator("currency")
     @classmethod
     def _validate_currency(cls, value: str | None) -> str | None:
-        if value is None:
-            return value
-        if len(value) != 3 or not value.isalpha() or value != value.upper():
-            raise ValueError("currency must be a 3-letter uppercase ISO-4217 code")
-        return value
+        return None if value is None else validate_iso4217_currency(value)
 
     @field_validator("gross_total")
     @classmethod

@@ -9,6 +9,7 @@ requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.141.1",
     "pillow>=12.3.0",
+    "pycountry>=26.2.16",
     "pypdf>=6.18.1",
     "pypdfium2>=5.13.0",
     "pytesseract>=0.3.13",

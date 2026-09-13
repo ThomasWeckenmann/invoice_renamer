@@ -34,7 +34,7 @@ def test_full_construction_round_trips() -> None:
     assert extraction.evidence["seller"].page == 1
 
 
-@pytest.mark.parametrize("currency", ["eur", "EU", "EURO", "12A"])
+@pytest.mark.parametrize("currency", ["eur", "EU", "EURO", "12A", "ZZZ", "ÄBC", "中文币"])
 def test_invalid_currency_codes_are_rejected(currency: str) -> None:
     with pytest.raises(ValidationError):
         InvoiceExtraction(currency=currency)

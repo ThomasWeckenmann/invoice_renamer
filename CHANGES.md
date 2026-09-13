@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 0.6.0 (2026-09-13, claude sonnet-5)
+
+- Add the RunMetrics contract: per-run timings, execution path, tokens, and labeled cost
+
+  Cost is nullable and, per the plan, never fabricated: whenever set, it must
+  be finite and paired with a currency and a cost_source (provider_reported
+  vs. estimated). Currency codes and tokens_per_second are checked for real
+  ISO-4217 membership and finiteness, not just shape, rejecting NaN/Infinity.
+
 ## Version 0.5.0 (2026-09-13, claude sonnet-5)
 
 - Add the invoice extraction interface: prompting, JSON validation, and one repair retry
@@ -17,22 +26,6 @@
   Tesseract, reconstructing line breaks from its word bounding-box groupings
   and reporting per-page confidence. Requires the tesseract-ocr binary plus
   eng/deu language data installed locally; ocrmac stays a future macOS adapter.
-
-- bugfix: stop announcing worker readiness before the socket is actually bound
-
-  A failed port bind could still be reported as 'ready' to the desktop shell,
-  since FastAPI's startup lifespan ran before uvicorn's socket bind. The ready
-  marker now only prints after uvicorn confirms the bind succeeded.
-
-- bugfix: count non-whitespace characters when deciding a page needs OCR
-
-  Padding a page with wide runs of spaces could push it over the usability
-  threshold on raw character count alone, skipping OCR on sparse text.
-
-- bugfix: preserve the amount/currency suffix when truncating long filenames
-
-  A long seller/product name could truncate the whole filename stem,
-  silently dropping the amount and currency without flagging review.
 
 ## Version 0.3.0 (2026-09-13, claude sonnet-5)
 
