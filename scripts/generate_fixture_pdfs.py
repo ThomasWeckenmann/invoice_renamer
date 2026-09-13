@@ -2,10 +2,13 @@
 
 from pathlib import Path
 
+import pypdfium2 as pdfium
 from pypdf import PdfWriter
+from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 
 FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures"
+_PAGE_SIZE = (400, 500)
 
 _ZUGFERD_XML = """<?xml version="1.0" encoding="UTF-8"?>
 <rsm:CrossIndustryInvoice xmlns:rsm="urn:factur-x:invoice">
@@ -23,9 +26,40 @@ def _text_page_pdf(path: Path, lines: list[str]) -> None:
     c.save()
 
 
+def _sparse_whitespace_pdf(path: Path) -> None:
+    """A page with almost no real content padded out with wide runs of spaces.
+
+    Exercises the OCR-routing heuristic's non-whitespace character count:
+    total text length alone would look 'usable' here.
+    """
+    c = canvas.Canvas(str(path), pagesize=_PAGE_SIZE)
+    c.drawString(40, 460, "A" + " " * 30 + "B")
+    c.save()
+
+
 def _blank_page_pdf(path: Path) -> None:
-    c = canvas.Canvas(str(path), pagesize=(400, 500))
+    c = canvas.Canvas(str(path), pagesize=_PAGE_SIZE)
     c.showPage()
+    c.save()
+
+
+def _scanned_page_pdf(path: Path, lines: list[str]) -> None:
+    """Builds a page with rasterized text but no text layer, to exercise OCR.
+
+    Draws the text as a normal PDF first, rasterizes that page to an image,
+    then places only the image on the final page so pypdf.extract_text()
+    returns nothing and the page must go through OCR.
+    """
+    text_pdf_path = path.with_suffix(".tmp.pdf")
+    _text_page_pdf(text_pdf_path, lines)
+
+    document = pdfium.PdfDocument(str(text_pdf_path))
+    image = document[0].render(scale=2.0).to_pil()
+    document.close()
+    text_pdf_path.unlink()
+
+    c = canvas.Canvas(str(path), pagesize=_PAGE_SIZE)
+    c.drawImage(ImageReader(image), 0, 0, width=_PAGE_SIZE[0], height=_PAGE_SIZE[1])
     c.save()
 
 
@@ -41,9 +75,14 @@ def main() -> None:
         ["Rechnung Nr. 1001", "Verkaeufer: Mueller GmbH", "Betrag: 199,00 EUR"],
     )
     _blank_page_pdf(FIXTURES_DIR / "blank_page.pdf")
+    _sparse_whitespace_pdf(FIXTURES_DIR / "sparse_whitespace.pdf")
+    _scanned_page_pdf(
+        FIXTURES_DIR / "scanned_invoice.pdf",
+        ["Invoice #2002", "Seller: Acme Corp", "Total: 450.00 EUR"],
+    )
 
     mixed_text_page = FIXTURES_DIR / "_mixed_text_page.pdf"
-    _text_page_pdf(mixed_text_page, ["Page one has real text."])
+    _text_page_pdf(mixed_text_page, ["Page one has plenty of real invoice text here."])
     blank_page = FIXTURES_DIR / "_mixed_blank_page.pdf"
     _blank_page_pdf(blank_page)
 

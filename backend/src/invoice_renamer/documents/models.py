@@ -7,6 +7,7 @@ class PageText(BaseModel):
     page_number: int
     text: str
     needs_ocr: bool
+    ocr_confidence: float | None = None
 
 
 class NormalizedDocument(BaseModel):

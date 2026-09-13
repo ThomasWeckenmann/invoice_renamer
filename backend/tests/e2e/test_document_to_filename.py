@@ -41,3 +41,30 @@ def test_selectable_text_invoice_produces_a_clean_filename_proposal() -> None:
 
     assert proposal.proposed_filename == "2026-09-12_Apple_MacBook-Air_2180-EUR.pdf"
     assert proposal.requires_review is False
+
+
+def test_scanned_invoice_is_recovered_via_ocr_and_produces_a_filename_proposal() -> None:
+    pdf_bytes = (FIXTURES_DIR / "scanned_invoice.pdf").read_bytes()
+
+    document = read_document(pdf_bytes)
+    assert document.pages[0].needs_ocr is True
+    assert "Seller: Acme Corp" in document.pages[0].text
+
+    extraction = InvoiceExtraction(
+        invoice_date=date(2026, 1, 15),
+        seller="Acme Corp",
+        product_summary="Consulting services",
+        gross_total=Decimal("450"),
+        currency="EUR",
+        language=Language.ENGLISH,
+        evidence={
+            "seller": Evidence(page=1, excerpt="Seller: Acme Corp", xml_field=None),
+        },
+        warnings=["seller/product identified from OCR text at 96% confidence"],
+    )
+
+    proposal = build_filename_proposal(extraction)
+
+    assert proposal.proposed_filename == "2026-01-15_Acme-Corp_Consulting-services_450-EUR.pdf"
+    # OCR-derived extractions carry a confidence warning, so they always get a review pass.
+    assert proposal.requires_review is True

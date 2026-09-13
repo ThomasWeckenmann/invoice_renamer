@@ -86,8 +86,10 @@ def test_non_german_accents_are_stripped_to_ascii() -> None:
     assert "Cafe-Francais" in proposal.proposed_filename
 
 
-def test_long_product_summary_is_truncated() -> None:
+def test_long_product_summary_is_truncated_without_losing_amount_or_currency() -> None:
     proposal = build_filename_proposal(_extraction(product_summary="Word " * 60))
 
     stem = proposal.proposed_filename.removesuffix(".pdf")
     assert len(stem) <= 150
+    # The amount/currency suffix must survive truncation, not just overall length.
+    assert stem.endswith("_2180-EUR")

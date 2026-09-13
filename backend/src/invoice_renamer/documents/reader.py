@@ -1,7 +1,5 @@
-"""Extracts per-page text and detects embedded ZUGFeRD/Factur-X XML from PDF bytes.
-
-OCR is not performed here: pages whose extracted text is too short to be
-usable are flagged via `needs_ocr` for a separate OCR adapter to handle.
+"""Extracts per-page text from PDF bytes, detects embedded ZUGFeRD/Factur-X XML, and
+OCRs pages whose extracted text is too short to be usable.
 """
 
 from io import BytesIO
@@ -11,6 +9,8 @@ from pypdf._page import PageObject
 from pypdf.errors import PyPdfError
 
 from invoice_renamer.documents.models import NormalizedDocument, PageText
+from invoice_renamer.documents.ocr import OcrEngine, TesseractOcrEngine
+from invoice_renamer.documents.render import render_page_to_image
 
 # Below this many non-whitespace characters, a page's extracted text is
 # considered unusable and routed to OCR instead.
@@ -28,7 +28,7 @@ _ZUGFERD_ATTACHMENT_NAMES = {
 }
 
 
-def read_document(pdf_bytes: bytes) -> NormalizedDocument:
+def read_document(pdf_bytes: bytes, *, ocr_engine: OcrEngine | None = None) -> NormalizedDocument:
     try:
         reader = PdfReader(BytesIO(pdf_bytes))
         page_count = len(reader.pages)
@@ -40,17 +40,28 @@ def read_document(pdf_bytes: bytes) -> NormalizedDocument:
     if page_count > _MAX_PAGES:
         raise ValueError(f"PDF has too many pages (> {_MAX_PAGES})")
 
-    pages = [_read_page(index, page) for index, page in enumerate(reader.pages)]
+    ocr_engine = ocr_engine or TesseractOcrEngine()
+    pages = [
+        _read_page(index, page, pdf_bytes, ocr_engine) for index, page in enumerate(reader.pages)
+    ]
 
     return NormalizedDocument(pages=pages, embedded_xml=_find_embedded_xml(reader))
 
 
-def _read_page(index: int, page: PageObject) -> PageText:
+def _read_page(index: int, page: PageObject, pdf_bytes: bytes, ocr_engine: OcrEngine) -> PageText:
     text = (page.extract_text() or "").strip()
+    non_whitespace_chars = len("".join(text.split()))
+    needs_ocr = non_whitespace_chars < _MIN_USABLE_TEXT_CHARS
+    if not needs_ocr:
+        return PageText(page_number=index + 1, text=text, needs_ocr=False)
+
+    image = render_page_to_image(pdf_bytes, index)
+    result = ocr_engine.recognize(image, language="eng+deu")
     return PageText(
         page_number=index + 1,
-        text=text,
-        needs_ocr=len(text) < _MIN_USABLE_TEXT_CHARS,
+        text=result.text,
+        needs_ocr=True,
+        ocr_confidence=result.confidence,
     )
 
 

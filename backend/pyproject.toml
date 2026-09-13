@@ -8,7 +8,10 @@ version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.141.1",
+    "pillow>=12.3.0",
     "pypdf>=6.18.1",
+    "pypdfium2>=5.13.0",
+    "pytesseract>=0.3.13",
     "uvicorn>=0.52.4",
 ]
 
@@ -27,6 +30,10 @@ select = ["E", "F", "I"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
+
+[[tool.mypy.overrides]]
+module = ["pytesseract", "pypdfium2"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

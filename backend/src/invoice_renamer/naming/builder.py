@@ -75,8 +75,16 @@ def build_filename_proposal(extraction: InvoiceExtraction) -> FilenameProposal:
     currency_missing = extraction.currency is None
     currency_part = extraction.currency or _MISSING_CURRENCY
 
-    stem = f"{date_part}_{seller_part}_{product_part}_{amount_part}-{currency_part}"
-    stem = stem[:_MAX_STEM_LENGTH]
+    # The amount/currency suffix is always kept whole; only the date/seller/product
+    # prefix is truncated to fit the overall length budget, so a long product name
+    # can never push the amount or currency out of the proposed filename.
+    suffix = f"_{amount_part}-{currency_part}"
+    prefix = f"{date_part}_{seller_part}_{product_part}"
+    max_prefix_length = max(0, _MAX_STEM_LENGTH - len(suffix))
+    if len(prefix) > max_prefix_length:
+        prefix = prefix[:max_prefix_length].rstrip("_-")
+
+    stem = f"{prefix}{suffix}"
 
     requires_review = (
         date_missing
