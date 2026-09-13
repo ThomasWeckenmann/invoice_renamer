@@ -2,13 +2,21 @@
 
 ## Objective
 
-Build a macOS app that analyzes German and English invoice PDFs and proposes filenames in this form:
+Build a macOS and Linux desktop app that analyzes German and English invoice PDFs and proposes filenames in this form:
 
 `YYYY-MM-DD_Seller_Product_Amount-CURRENCY.pdf`
 
 Example: `2026-09-12_Apple_MacBook-Air_2180-EUR.pdf`
 
 The app processes locally by default, previews all proposals, renames approved originals, and supports Undo. Cloud analysis through OpenRouter is always explicit.
+
+## Development environment
+
+- Day-to-day coding and most testing happen in a sandboxed, non-macOS environment (a Linux dev container). Pace favors small, verifiable steps over speed, since this project doubles as a learning exercise.
+- Everything cross-platform builds and tests fully there: FastAPI, Pydantic contracts, the document reader, the filename builder, and local-model inference logic all run correctly on CPU. MPS is an acceleration backend, not a functional requirement, so inference logic can be developed and unit-tested without Apple Silicon.
+- Four pieces are macOS-only and cannot be built or verified in that environment: the Tauri desktop shell (BB-01), the `ocrmac` OCR adapter (BB-04), MPS-specific behavior for BB-06, and macOS signing/notarization/packaging (BB-14). Develop these behind interfaces/mocks in the sandboxed environment, then verify the real build by running it directly on macOS hardware outside any agent session.
+- The app targets macOS and Linux. OCR (BB-04) and the local model runtime (BB-06) are pluggable per OS: an open-source OCR engine and CUDA/ROCm/CPU inference by default, with `ocrmac`/Apple Vision and MPS used automatically when macOS is detected. Whether Linux ships as a full MVP release target (its own packaging pipeline) or stays a development/compatibility target only is an open choice, revisited when BB-14 packaging work starts.
+- Before the full feasibility spike, run a minimal packaging spike first: a bare Tauri shell launching a hello-world FastAPI sidecar, no PyTorch or OCR, to de-risk sidecar packaging and signing in the smallest possible slice. See Milestone 1 below.
 
 ## MVP scope
 
@@ -36,7 +44,7 @@ Each building block owns one responsibility, exposes a narrow interface, and can
 | BB-01 | Desktop host | Tauri/Rust | Start/stop worker, session token, native dialogs | 1 |
 | BB-02 | Local API and jobs | FastAPI/Python | OpenAPI endpoints, job status, cancellation | 1 |
 | BB-03 | Document reader | Python | PDF bytes → normalized pages and embedded XML | 2 |
-| BB-04 | OCR adapter | Python + Apple Vision | Page image → positioned text and confidence | 1–2 |
+| BB-04 | OCR adapter | Python + OCR engine (open-source default, `ocrmac` on macOS) | Page image → positioned text and confidence | 1–2 |
 | BB-05 | Extraction contract | Python/Pydantic | Normalized document → validated `InvoiceExtraction` | 2 |
 | BB-06 | Local model runtime | Transformers/PyTorch | Extraction request → model response and metrics | 1–3 |
 | BB-07 | Model catalog and manager | Python | Supported models, compatibility, download/remove/status | 3 |
@@ -45,7 +53,7 @@ Each building block owns one responsibility, exposes a narrow interface, and can
 | BB-10 | Batch workspace | React/TypeScript | Import, model selection, progress, edits, approval | 4 |
 | BB-11 | File transaction and Undo | Tauri/Rust | Atomic preflight, rename result, persistent Undo record | 4 |
 | BB-12 | Run report | Python + React | Timings, model/provider, OCR path, tokens, cost, warnings | 3–5 |
-| BB-13 | Settings and secrets | Tauri/Rust | Preferences plus Keychain-backed OpenRouter key | 5 |
+| BB-13 | Settings and secrets | Tauri/Rust | Preferences plus OS-keychain-backed OpenRouter key (Keychain on macOS, Secret Service/libsecret on Linux) | 5 |
 | BB-14 | Packaging pipeline | Tauri + Python tooling | Signed app containing the packaged sidecar | 1 and 6 |
 
 Primary flow:
@@ -136,7 +144,7 @@ All requests require a random session token created by Tauri when starting the w
 | Method | Endpoint | Purpose |
 |---|---|---|
 | GET | `/health` | Worker and dependency status |
-| GET | `/capabilities` | MPS, OCR, memory, disk, and model readiness |
+| GET | `/capabilities` | Acceleration backend (MPS/CUDA/CPU), OCR, memory, disk, and model readiness |
 | GET | `/models` | Supported open/closed models, availability, installation, and recommendations |
 | POST | `/models/{id}/download` | Start or resume a model download |
 | DELETE | `/models/{id}` | Remove an installed model |
@@ -154,7 +162,7 @@ Job results include `FilenameProposal` and `RunMetrics`. Cost is nullable and la
 2. Check for embedded ZUGFeRD/Factur-X XML and parse supported fields.
 3. Extract text page-by-page with `pypdf`.
 4. Detect pages with missing or poor-quality text using documented heuristics.
-5. Render those pages with `pypdfium2` and OCR with Apple Vision.
+5. Render those pages with `pypdfium2` and OCR with the platform engine (open-source default, Apple Vision on macOS).
 6. Reconstruct OCR lines using bounding boxes and preserve page boundaries.
 7. Merge validated XML fields with visible text; flag conflicts.
 8. Send normalized text to the selected inference adapter.
@@ -171,7 +179,7 @@ extract_invoice(document_text, schema, options) -> InvoiceExtraction
 
 Implement two adapters:
 
-- `TransformersExtractor`: local Hugging Face model on MPS.
+- `TransformersExtractor`: local Hugging Face model using the best available backend (MPS on Apple Silicon, CUDA/ROCm on Linux, else CPU), auto-selected with a manual override in settings.
 - `OpenRouterExtractor`: explicit cloud request with strict structured output.
 
 Validate every response with Pydantic. Allow one controlled repair/retry for invalid local JSON. Missing fields remain `null`; prompts must prohibit guessing.
@@ -180,8 +188,8 @@ Validate every response with Pydantic. Allow one controlled repair/retry for inv
 
 Shortlist 2–3 instruct models using these gates:
 
-- Runs through Transformers on MPS.
-- Fits an M2 with 16 GB while processing realistic invoice text.
+- Runs through Transformers on MPS (macOS) or CUDA/CPU (Linux).
+- Fits an M2 with 16 GB on macOS; Linux memory budget is defined per tested device rather than a fixed floor.
 - German and English instruction following.
 - License permits intended distribution.
 - Pinned revision; no `trust_remote_code`.
@@ -231,7 +239,7 @@ Store rename history locally in the app container. Do not store invoice text in 
 
 - Local mode performs no network requests after model installation.
 - Cloud uploads occur only after explicit selection and clear UI labeling.
-- Store the OpenRouter key in macOS Keychain.
+- Store the OpenRouter key in the OS keychain (Keychain on macOS, Secret Service/libsecret on Linux).
 - Redact keys, invoice text, and personal data from logs.
 - Use loopback only, a per-launch token, restricted CORS, request-size limits, and worker shutdown.
 - Keep telemetry disabled for the MVP.
@@ -242,8 +250,9 @@ Store rename history locally in the app container. Do not store invoice text in 
 - Python: isolated package managed with `uv`.
 - Package the Python worker as a standalone-directory sidecar; compare PyInstaller and Nuitka in the feasibility spike.
 - Include Python, FastAPI, PyTorch, OCR bridge, and PDF libraries; model weights download separately.
-- Sign nested binaries and libraries before signing the final app.
-- Maintain separate normal and App Store Tauri configurations.
+- Sign nested binaries and libraries before signing the final macOS app.
+- Maintain separate normal and App Store Tauri configurations for macOS.
+- Linux packaging (e.g. AppImage/deb) is a separate pipeline from macOS signing/notarization; whether it is built at all for the MVP depends on the open Linux shipping-target decision above.
 
 App Store feasibility requires an early sandbox test covering user-selected file access, sidecar execution, MPS, OCR, model storage/download, renaming, and Undo.
 
@@ -267,23 +276,25 @@ Track field accuracy, hallucinations, correction rate, product-label usefulness,
 
 ## Milestones
 
-1. **Feasibility spike — BB-01, 02, 04, 06, 14:** Tauri launches packaged FastAPI; MPS model and Apple OCR work in a signed/sandboxed build.
+1. **Feasibility spike — BB-01, 02, 04, 06, 14:**
+   - Step 1a — minimal packaging spike: a bare Tauri shell launches a hello-world FastAPI sidecar, no PyTorch or OCR; verify build and signing on macOS directly.
+   - Step 1b — full spike: add the local model (logic developed and CPU-tested in the sandboxed environment, MPS behavior verified on macOS) and platform OCR (open-source engine, or Apple Vision on macOS); confirm the signed/sandboxed build works end to end.
 2. **Core processing — BB-03, 04, 05, 09:** PDF text/OCR/XML pipeline, schemas, validation, and filename builder.
-3. **Local AI — BB-06, 07, 12:** model benchmark, selected model, app-managed download, offline inference, and run metrics.
+3. **Local AI — BB-06, 07, 12:** model and OCR-engine benchmark, selected model, app-managed download, offline inference, and run metrics.
 4. **Desktop workflow — BB-10, 11:** import, batch progress, editable previews, rename, collision handling, and Undo.
-5. **Cloud option — BB-08, 12, 13:** Keychain, OpenRouter adapter, explicit cloud selection, cost display, and privacy UI.
-6. **Release hardening — BB-14 and full system:** packaging, failure recovery, performance, accessibility, signing, and optional App Store submission.
+5. **Cloud option — BB-08, 12, 13:** OS keychain, OpenRouter adapter, explicit cloud selection, cost display, and privacy UI.
+6. **Release hardening — BB-14 and full system:** packaging, failure recovery, performance, accessibility, macOS signing, optional App Store submission, and Linux packaging if pursued as a shipping target.
 
 Each milestone must produce a runnable end-to-end slice. Do not build the full UI before the feasibility spike passes.
 
 ## MVP acceptance criteria
 
-- Runs on a clean M2/16 GB Mac without a separate Python or model-runtime installation.
+- Runs on a clean M2/16 GB Mac without a separate Python or model-runtime installation; runs on a representative Linux desktop if Linux ships as an MVP target.
 - Processes representative German and English invoices locally.
 - Never sends a local-mode invoice over the network.
 - Produces valid, editable filename proposals and flags unknown values.
 - Batch rename never overwrites files and can be undone safely.
 - Model download is visible, resumable, verified, removable, and offline afterward.
-- Cloud processing requires an explicit action and uses the Keychain-stored OpenRouter key.
+- Cloud processing requires an explicit action and uses the OS-keychain-stored OpenRouter key.
 - Open and closed models are clearly separated; closed models are disabled without a key.
 - Every completed run shows inference time and useful execution metadata; cloud cost is shown when available.

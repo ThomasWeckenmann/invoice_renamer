@@ -6,7 +6,7 @@ Core product and architecture decisions are complete. Exact models, packaging, a
 
 ## Product decisions
 
-- macOS desktop app; minimum M2 with 16 GB unified memory.
+- macOS and Linux desktop app. macOS minimum: M2 with 16 GB unified memory. Linux: no defined minimum memory spec; use GPU acceleration when available (CUDA/ROCm), otherwise fall back to CPU.
 - German and English invoices.
 - Supports selectable-text, scanned, mixed-page, and ZUGFeRD/Factur-X PDFs.
 - Local processing is the default.
@@ -27,8 +27,8 @@ Core product and architecture decisions are complete. Exact models, packaging, a
 | Desktop shell | Tauri 2 |
 | Frontend | React + TypeScript |
 | Backend | Python + FastAPI worker bundled as a Tauri sidecar |
-| Local inference | Hugging Face Transformers + PyTorch using Apple MPS |
-| OCR | Apple Vision through `ocrmac` |
+| Local inference | Hugging Face Transformers + PyTorch; backend auto-selected (MPS on Apple Silicon, CUDA/ROCm on Linux, else CPU) |
+| OCR | Open-source engine by default; Apple Vision through `ocrmac` automatically on macOS |
 | Cloud inference | OpenRouter with one user-supplied API key |
 
 Keep PDF processing and inference independent of FastAPI. Keep React independent of desktop file operations. This allows testing the Python core separately and reusing the API/UI for a future website.
@@ -82,7 +82,7 @@ The exact model and quantization are intentionally undecided until benchmarking.
 
 ## Cloud setup
 
-- OpenRouter uses one user-supplied key stored in macOS Keychain.
+- OpenRouter uses one user-supplied key stored in the OS keychain (Keychain on macOS, Secret Service/libsecret on Linux).
 - Cloud mode is selected explicitly per job or batch.
 - Closed models remain visible but greyed out until the key is set.
 - Use only endpoints supporting the required input and structured output.
@@ -93,7 +93,7 @@ The exact model and quantization are intentionally undecided until benchmarking.
 
 Build a thin end-to-end prototype that:
 
-1. Packages Tauri, React, Python, FastAPI, PyTorch, and `ocrmac`.
+1. Packages Tauri, React, Python, FastAPI, PyTorch, and platform OCR (`ocrmac` on macOS, an open-source engine elsewhere).
 2. Runs a small local model through MPS on an M2/16 GB Mac.
 3. Reads one selectable PDF and one scanned PDF.
 4. Produces an editable filename proposal, renames the file, and undoes it.
@@ -104,6 +104,8 @@ Then benchmark 2–3 small local models on 20–50 representative invoices. Meas
 ## Remaining implementation choices
 
 - Exact local model, quantization, and default OpenRouter model.
+- Cross-platform OCR engine (e.g. Tesseract vs. EasyOCR) for non-macOS, pending benchmark; avoid adding a second ML framework (e.g. PaddleOCR) given the packaging cost already carried by PyTorch.
+- Whether Linux ships as a full MVP release target (its own packaging/signing/distribution pipeline) or remains a development/compatibility target only, decided when packaging work starts.
 - PDF extraction/rendering libraries; likely `pypdf` plus `pypdfium2`.
 - Supported macOS floor.
 - Model download manifest and update policy.

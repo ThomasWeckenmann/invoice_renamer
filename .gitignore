@@ -9,6 +9,7 @@ __pycache__/
 dist/
 *.egg-info/
 .python-version
+backend/.pyinstaller/
 
 # Node
 node_modules/
@@ -21,6 +22,7 @@ target/
 # Tauri
 src-tauri/target/
 src-tauri/gen/
+src-tauri/binaries/
 
 # Environment
 .env

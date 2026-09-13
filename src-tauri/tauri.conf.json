@@ -1,0 +1,27 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Invoice Renamer",
+  "version": "0.1.0",
+  "identifier": "app.invoicerenamer.desktop",
+  "build": {
+    "frontendDist": "../app/dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm run dev --prefix ../app",
+    "beforeBuildCommand": "npm run build --prefix ../app"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Invoice Renamer",
+        "width": 960,
+        "height": 720
+      }
+    ]
+  },
+  "bundle": {
+    "active": false,
+    "icon": [],
+    "externalBin": ["binaries/invoice-renamer-worker"]
+  }
+}
