@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 0.7.0 (2026-09-13, claude sonnet-5)
+
+- Add the model catalog: entry schema, hardware compatibility, and the picker view
+
+  ModelCatalogEntry enforces different required fields per open/local vs.
+  closed/cloud entries and rejects negative file sizes. Compatibility checks
+  memory unconditionally but only judges free disk space against models not
+  yet installed, so an installed model isn't penalized for its own size.
+
 ## Version 0.6.0 (2026-09-13, claude sonnet-5)
 
 - Add the RunMetrics contract: per-run timings, execution path, tokens, and labeled cost
