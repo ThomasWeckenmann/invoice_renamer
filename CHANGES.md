@@ -1,5 +1,18 @@
 # Changelog
 
+## Version 0.12.0 (2026-09-14, claude sonnet-5)
+
+- Add the batch workspace UI: import, model selection, progress, review, and approval
+
+  React feature (app/src/features/batch) covers PDF import, model
+  selection/download, job progress polling, editable filename review, and
+  per-item/batch approval. Rename-commit is deferred to the file-transaction
+  layer; two cancel/poll races found in review are fixed.
+
+- bugfix: Fix cargo tauri dev failing to find app/package.json
+- bugfix: Allow the cargo tauri dev origin through the worker's CORS policy
+- Remove leftover Windows-only code paths
+
 ## Version 0.11.0 (2026-09-14, claude sonnet-5)
 
 - Add the invoice analysis pipeline and its job API

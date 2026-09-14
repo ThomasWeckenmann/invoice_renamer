@@ -27,10 +27,6 @@ def resolve_data_dir() -> Path:
         data_dir = Path(env_value)
     elif platform.system() == "Darwin":
         data_dir = Path.home() / "Library" / "Application Support" / "invoice-renamer"
-    elif platform.system() == "Windows":
-        app_data = os.environ.get("APPDATA")
-        base = Path(app_data) if app_data else Path.home() / "AppData" / "Roaming"
-        data_dir = base / "invoice-renamer"
     else:
         data_dir = Path.home() / ".local" / "share" / "invoice-renamer"
 

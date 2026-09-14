@@ -1,0 +1,112 @@
+.batch-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+.import-dropzone {
+  border: 2px dashed #999;
+  border-radius: 8px;
+  padding: 2rem;
+  text-align: center;
+}
+
+.import-dropzone--active {
+  border-color: #3b82f6;
+  background: #eff6ff;
+}
+
+.model-selector fieldset {
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  margin-bottom: 0.75rem;
+}
+
+.model-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.4rem 0;
+}
+
+.model-row__reasons {
+  margin: 0;
+  color: #b91c1c;
+  font-size: 0.85rem;
+}
+
+.model-row__error {
+  color: #b91c1c;
+}
+
+.batch-workspace__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.batch-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.batch-item {
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 0.75rem;
+}
+
+.batch-item__header {
+  display: flex;
+  justify-content: space-between;
+  font-weight: 600;
+}
+
+.batch-item__review label {
+  display: block;
+  margin: 0.5rem 0;
+}
+
+.batch-item__review input[type="text"] {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.batch-item__fields {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 0.75rem;
+  margin: 0.5rem 0;
+}
+
+.batch-item__flag,
+.batch-item__error {
+  color: #b91c1c;
+}
+
+.batch-item__warnings {
+  color: #92400e;
+  font-size: 0.85rem;
+}
+
+.batch-item__actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.batch-workspace__commit {
+  margin-top: 1rem;
+}
+
+.batch-workspace__note {
+  font-size: 0.85rem;
+  color: #666;
+}

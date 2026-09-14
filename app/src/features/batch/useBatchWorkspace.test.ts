@@ -1,0 +1,203 @@
+/** Tests for the batch workspace hook: import filtering, submit+poll to
+ * completion, filename edits, approval, and cancellation. */
+
+import { act, renderHook, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import * as analysesApi from "../../lib/api/analyses";
+import type { AnalysisJobView } from "../../lib/api/types";
+import { useBatchWorkspace } from "./useBatchWorkspace";
+
+vi.mock("../../lib/api/analyses");
+
+function pdfFile(name = "invoice.pdf"): File {
+  return new File(["%PDF-1.4"], name, { type: "application/pdf" });
+}
+
+function queuedJob(overrides: Partial<AnalysisJobView> = {}): AnalysisJobView {
+  return {
+    id: "job-1",
+    model_id: "granite-3.3-2b",
+    original_filename: "invoice.pdf",
+    status: "queued",
+    proposal: null,
+    metrics: null,
+    error: null,
+    ...overrides,
+  };
+}
+
+describe("useBatchWorkspace", () => {
+  afterEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it("addFiles keeps only PDFs", () => {
+    const { result } = renderHook(() => useBatchWorkspace());
+
+    act(() => {
+      result.current.addFiles([pdfFile("a.pdf"), new File(["x"], "b.txt", { type: "text/plain" })]);
+    });
+
+    expect(result.current.items).toHaveLength(1);
+    expect(result.current.items[0].file.name).toBe("a.pdf");
+    expect(result.current.items[0].status).toBe("pending");
+  });
+
+  it("startAnalysis submits pending items and polls the job to completion", async () => {
+    vi.mocked(analysesApi.submitAnalysis).mockResolvedValue(queuedJob());
+    vi.mocked(analysesApi.fetchJob).mockResolvedValue(
+      queuedJob({
+        status: "completed",
+        proposal: {
+          extraction: {
+            invoice_date: "2026-01-05",
+            seller: "Acme",
+            product_summary: "Widget",
+            gross_total: "42.00",
+            currency: "EUR",
+            language: "en",
+            evidence: {},
+            warnings: [],
+          },
+          proposed_filename: "2026-01-05_Acme_Widget_42-EUR.pdf",
+          requires_review: false,
+        },
+        metrics: null,
+      }),
+    );
+
+    const { result } = renderHook(() => useBatchWorkspace());
+    act(() => result.current.addFiles([pdfFile()]));
+
+    act(() => result.current.startAnalysis("granite-3.3-2b"));
+    expect(result.current.items[0].status).toBe("queued");
+    expect(analysesApi.submitAnalysis).toHaveBeenCalledWith(expect.any(File), "granite-3.3-2b");
+
+    await waitFor(() => expect(result.current.items[0].status).toBe("needs_review"), {
+      timeout: 3000,
+    });
+    expect(result.current.items[0].proposal?.proposed_filename).toBe(
+      "2026-01-05_Acme_Widget_42-EUR.pdf",
+    );
+  });
+
+  it("surfaces a submit failure as a failed item", async () => {
+    vi.mocked(analysesApi.submitAnalysis).mockRejectedValue(new Error("model not installed"));
+
+    const { result } = renderHook(() => useBatchWorkspace());
+    act(() => result.current.addFiles([pdfFile()]));
+    act(() => result.current.startAnalysis("granite-3.3-2b"));
+
+    await waitFor(() => expect(result.current.items[0].status).toBe("failed"));
+    expect(result.current.items[0].error).toBe("model not installed");
+  });
+
+  it("editFilename overrides the proposed filename, and approve/unapprove toggle status", () => {
+    const { result } = renderHook(() => useBatchWorkspace());
+    act(() => result.current.addFiles([pdfFile()]));
+    const id = result.current.items[0].id;
+
+    act(() => result.current.editFilename(id, "custom-name.pdf"));
+    expect(result.current.items[0].editedFilename).toBe("custom-name.pdf");
+
+    act(() => result.current.approveItem(id));
+    expect(result.current.items[0].status).toBe("approved");
+
+    act(() => result.current.unapproveItem(id));
+    expect(result.current.items[0].status).toBe("needs_review");
+  });
+
+  it("cancelItem cancels the backend job and marks the item cancelled", async () => {
+    vi.mocked(analysesApi.submitAnalysis).mockResolvedValue(queuedJob());
+    vi.mocked(analysesApi.cancelJob).mockResolvedValue(queuedJob({ status: "cancelled" }));
+
+    const { result } = renderHook(() => useBatchWorkspace());
+    act(() => result.current.addFiles([pdfFile()]));
+    act(() => result.current.startAnalysis("granite-3.3-2b"));
+    const id = result.current.items[0].id;
+
+    await waitFor(() => expect(result.current.items[0].jobId).toBe("job-1"));
+
+    act(() => result.current.cancelItem(id));
+
+    expect(result.current.items[0].status).toBe("cancelled");
+    expect(analysesApi.cancelJob).toHaveBeenCalledWith("job-1");
+  });
+
+  it("removeItem drops the item from the list", () => {
+    const { result } = renderHook(() => useBatchWorkspace());
+    act(() => result.current.addFiles([pdfFile()]));
+    const id = result.current.items[0].id;
+
+    act(() => result.current.removeItem(id));
+
+    expect(result.current.items).toHaveLength(0);
+  });
+
+  it("cancelling while the upload is still in flight does not get resurrected by the late response", async () => {
+    let resolveSubmit!: (job: AnalysisJobView) => void;
+    vi.mocked(analysesApi.submitAnalysis).mockReturnValue(
+      new Promise((resolve) => {
+        resolveSubmit = resolve;
+      }),
+    );
+    vi.mocked(analysesApi.cancelJob).mockResolvedValue(queuedJob({ status: "cancelled" }));
+
+    const { result } = renderHook(() => useBatchWorkspace());
+    act(() => result.current.addFiles([pdfFile()]));
+    const id = result.current.items[0].id;
+
+    act(() => result.current.startAnalysis("granite-3.3-2b"));
+    expect(result.current.items[0].status).toBe("queued");
+
+    // Cancel while the upload is still pending: no job id exists yet, so
+    // there's nothing to send a cancel request for.
+    act(() => result.current.cancelItem(id));
+    expect(result.current.items[0].status).toBe("cancelled");
+    expect(analysesApi.cancelJob).not.toHaveBeenCalled();
+
+    // The upload now resolves late, handing back the first real job id.
+    await act(async () => {
+      resolveSubmit(queuedJob({ id: "late-job" }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(result.current.items[0].status).toBe("cancelled");
+    expect(analysesApi.cancelJob).toHaveBeenCalledWith("late-job");
+    expect(analysesApi.fetchJob).not.toHaveBeenCalled();
+  });
+
+  it("a poll response that lands after cancellation does not resurrect the item", async () => {
+    vi.mocked(analysesApi.submitAnalysis).mockResolvedValue(queuedJob());
+    let resolveFetchJob!: (job: AnalysisJobView) => void;
+    vi.mocked(analysesApi.fetchJob).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveFetchJob = resolve;
+        }),
+    );
+    vi.mocked(analysesApi.cancelJob).mockResolvedValue(queuedJob({ status: "cancelled" }));
+
+    const { result } = renderHook(() => useBatchWorkspace());
+    act(() => result.current.addFiles([pdfFile()]));
+    act(() => result.current.startAnalysis("granite-3.3-2b"));
+    const id = result.current.items[0].id;
+
+    await waitFor(() => expect(result.current.items[0].jobId).toBe("job-1"));
+    // Wait for the poll interval to fire so a fetchJob call is in flight
+    // (blocked on the unresolved promise above) at the moment we cancel.
+    await waitFor(() => expect(analysesApi.fetchJob).toHaveBeenCalled(), { timeout: 2000 });
+
+    act(() => result.current.cancelItem(id));
+    expect(result.current.items[0].status).toBe("cancelled");
+
+    await act(async () => {
+      resolveFetchJob(queuedJob({ status: "running" }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(result.current.items[0].status).toBe("cancelled");
+  });
+});

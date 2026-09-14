@@ -90,19 +90,6 @@ def test_resolve_data_dir_defaults_on_macos(
     assert result.is_dir()
 
 
-def test_resolve_data_dir_defaults_on_windows(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.delenv(installer.DATA_DIR_ENV_VAR, raising=False)
-    monkeypatch.setattr(installer.platform, "system", lambda: "Windows")
-    monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
-
-    result = resolve_data_dir()
-
-    assert result == tmp_path / "Roaming" / "invoice-renamer"
-    assert result.is_dir()
-
-
 def test_resolve_data_dir_defaults_on_linux(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -419,4 +406,4 @@ def test_default_fetch_is_late_bound_and_monkeypatchable(
 def test_platform_module_is_the_real_platform_module() -> None:
     # Sanity check that installer.platform is the stdlib module (used by the
     # monkeypatch-based tests above) and matches the real host at import time.
-    assert installer.platform.system() in {"Darwin", "Windows", "Linux", platform.system()}
+    assert installer.platform.system() in {"Darwin", "Linux", platform.system()}

@@ -8,9 +8,13 @@ from invoice_renamer.api.auth import require_session_token
 from invoice_renamer.api.models_routes import ModelInstallCoordinator, models_router
 from invoice_renamer.models.installer import resolve_data_dir
 
-# Tauri's webview origins, not real HTTP hosts: tauri://localhost on macOS/Linux,
-# http://tauri.localhost on Windows.
-_ALLOWED_ORIGINS = ["tauri://localhost", "http://tauri.localhost"]
+# tauri://localhost is Tauri's webview origin on macOS/Linux (the only
+# targeted platforms), not a real HTTP host. http://localhost:1420 is the
+# `cargo tauri dev` case, where the webview loads the Vite dev server
+# directly instead of a packaged app - every request still needs the
+# per-launch session token, so trusting that origin doesn't bypass auth,
+# only CORS.
+_ALLOWED_ORIGINS = ["tauri://localhost", "http://localhost:1420"]
 
 
 def create_app() -> FastAPI:
