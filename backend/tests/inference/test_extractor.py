@@ -56,6 +56,24 @@ def test_document_text_is_included_in_the_prompt() -> None:
     assert "--- Page 1 ---" in model.prompts[0]
 
 
+def test_json_wrapped_in_a_markdown_fence_with_language_tag_is_parsed() -> None:
+    model = _ScriptedLanguageModel([f"```json\n{_VALID_JSON}\n```"])
+
+    extraction = extract_invoice(_document(), model)
+
+    assert extraction.seller == "Apple"
+    assert len(model.prompts) == 1  # parsed on the first attempt, no repair needed
+
+
+def test_json_wrapped_in_a_bare_markdown_fence_is_parsed() -> None:
+    model = _ScriptedLanguageModel([f"```\n{_VALID_JSON}\n```"])
+
+    extraction = extract_invoice(_document(), model)
+
+    assert extraction.seller == "Apple"
+    assert len(model.prompts) == 1
+
+
 def test_malformed_json_is_repaired_on_retry() -> None:
     model = _ScriptedLanguageModel(["not json at all", _VALID_JSON])
 
@@ -129,3 +147,24 @@ def test_document_warnings_are_preserved_on_repeated_failure() -> None:
 
     assert "page 1: low OCR confidence on the total" in extraction.warnings
     assert any("could not be validated" in warning for warning in extraction.warnings)
+
+
+def test_final_warning_includes_the_raw_response_that_failed_to_parse() -> None:
+    document = _document()
+    model = _ScriptedLanguageModel(["not json at all", "still not json"])
+
+    extraction = extract_invoice(document, model, max_repair_attempts=1)
+
+    assert any("still not json" in warning for warning in extraction.warnings)
+
+
+def test_final_warning_truncates_a_very_long_raw_response() -> None:
+    document = _document()
+    long_response = "x" * 1000
+    model = _ScriptedLanguageModel([long_response, long_response])
+
+    extraction = extract_invoice(document, model, max_repair_attempts=1)
+
+    warning = next(w for w in extraction.warnings if "could not be validated" in w)
+    assert "(truncated)" in warning
+    assert len(warning) < len(long_response)

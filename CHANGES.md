@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 0.9.0 (2026-09-13, claude sonnet-5)
+
+- Add local invoice extraction: a Transformers backend, a benchmark harness, and a trimmed two-model catalog
+
+  Catalog now lists Granite-3.3-2B-Instruct (provisional default) and
+  Qwen3-0.6B (available, not yet recommended) after benchmarking five
+  candidates. Includes a gross_total net-vs-gross prompt fix and a
+  seller/product_summary scoring fix. Findings: `docs/model_benchmark_findings.md`.
+
 ## Version 0.8.0 (2026-09-13, claude sonnet-5)
 
 - Add real hardware-capability detection: memory, free disk, and acceleration backend

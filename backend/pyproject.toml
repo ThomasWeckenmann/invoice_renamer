@@ -14,6 +14,8 @@ dependencies = [
     "pypdf>=6.18.1",
     "pypdfium2>=5.13.0",
     "pytesseract>=0.3.13",
+    "torch>=2.9.1",
+    "transformers>=5.17.0",
     "uvicorn>=0.52.4",
 ]
 
@@ -39,6 +41,20 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+# Linux dev/CI has no GPU, so torch is pinned to the CPU-only wheel there to
+# avoid pulling multi-GB CUDA libraries it can't use. macOS has no CUDA variant
+# at all - its default PyPI wheel is already the lean MPS-capable build - so it
+# falls through to the normal index instead of this pin (the pinned index's
+# macOS wheel for 2.9.1 turned out to be missing torchgen, which torch's own
+# import path needs; the default PyPI wheel doesn't have that problem).
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [dependency-groups]
 build = [

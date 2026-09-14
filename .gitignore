@@ -35,8 +35,8 @@ src-tauri/binaries/
 .vscode/settings.json
 .idea/
 
-# Temp
-_temp/
+# Local, private benchmark data (real invoices, extraction results) - never committed
+local_benchmark_data/
 
 # Model weights (download separately)
 backend/models/
