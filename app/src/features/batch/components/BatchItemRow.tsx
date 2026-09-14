@@ -3,10 +3,12 @@
 
 import type { ChangeEvent } from "react";
 import { formatAmount } from "../../../lib/format";
+import type { RenameOutcome } from "../useRenameTransaction";
 import { displayFilename, type BatchItem } from "../types";
 
 interface BatchItemRowProps {
   item: BatchItem;
+  renameOutcome?: RenameOutcome;
   onEditFilename: (id: string, filename: string) => void;
   onApprove: (id: string) => void;
   onUnapprove: (id: string) => void;
@@ -26,6 +28,7 @@ const STATUS_LABELS: Record<BatchItem["status"], string> = {
 
 export function BatchItemRow({
   item,
+  renameOutcome,
   onEditFilename,
   onApprove,
   onUnapprove,
@@ -34,6 +37,7 @@ export function BatchItemRow({
 }: BatchItemRowProps) {
   const { extraction } = item.proposal ?? { extraction: null };
   const canReview = item.status === "needs_review" || item.status === "approved";
+  const isRenamed = renameOutcome?.status === "renamed";
 
   const handleFilenameChange = (event: ChangeEvent<HTMLInputElement>) => {
     onEditFilename(item.id, event.target.value);
@@ -54,9 +58,21 @@ export function BatchItemRow({
               type="text"
               value={displayFilename(item)}
               onChange={handleFilenameChange}
+              disabled={isRenamed}
               aria-label={`Proposed filename for ${item.file.name}`}
             />
           </label>
+
+          {renameOutcome?.status === "renamed" && (
+            <p className="batch-item__renamed" role="status">
+              Renamed to {renameOutcome.destinationPath}
+            </p>
+          )}
+          {renameOutcome?.status === "failed" && (
+            <p role="alert" className="batch-item__error">
+              Rename failed: {renameOutcome.message}
+            </p>
+          )}
 
           {extraction && (
             <dl className="batch-item__fields">
@@ -89,6 +105,7 @@ export function BatchItemRow({
             <input
               type="checkbox"
               checked={item.status === "approved"}
+              disabled={isRenamed}
               onChange={(event) => (event.target.checked ? onApprove(item.id) : onUnapprove(item.id))}
             />
             Approve

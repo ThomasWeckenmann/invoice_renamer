@@ -4,10 +4,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cancelJob, fetchJob, submitAnalysis } from "../../lib/api/analyses";
 import type { AnalysisJobView, JobStatus } from "../../lib/api/types";
-import type { BatchItem, BatchItemStatus } from "./types";
+import type { BatchItem, BatchItemStatus, ImportedFile } from "./types";
 
 const POLL_INTERVAL_MS = 800;
-const PDF_MIME = "application/pdf";
 
 function makeId(): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -34,13 +33,9 @@ function statusFromJob(status: JobStatus): BatchItemStatus {
   }
 }
 
-function isPdf(file: File): boolean {
-  return file.type === PDF_MIME || file.name.toLowerCase().endsWith(".pdf");
-}
-
 export interface UseBatchWorkspaceResult {
   items: BatchItem[];
-  addFiles: (files: FileList | File[]) => void;
+  addFiles: (files: ImportedFile[]) => void;
   removeItem: (id: string) => void;
   editFilename: (id: string, filename: string) => void;
   approveItem: (id: string) => void;
@@ -121,14 +116,14 @@ export function useBatchWorkspace(): UseBatchWorkspaceResult {
     [updateItem],
   );
 
-  const addFiles = useCallback((files: FileList | File[]) => {
-    const pdfFiles = Array.from(files).filter(isPdf);
+  const addFiles = useCallback((files: ImportedFile[]) => {
     setItems((prev) => [
       ...prev,
-      ...pdfFiles.map(
-        (file): BatchItem => ({
+      ...files.map(
+        ({ file, sourcePath }): BatchItem => ({
           id: makeId(),
           file,
+          sourcePath,
           status: "pending",
           jobId: null,
           proposal: null,

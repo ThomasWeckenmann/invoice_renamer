@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 0.13.0 (2026-09-14, claude sonnet-5)
+
+- Add the file rename transaction and Undo (BB-11), with native file import to unblock it
+
+  Approved invoices can now be renamed in place: collisions resolve
+  automatically, rename/Undo use an atomic no-overwrite primitive, and
+  Undo persists across restarts. Import now uses the native dialog and
+  window drag-drop, since a browser file input can't expose a real path.
+
 ## Version 0.12.0 (2026-09-14, claude sonnet-5)
 
 - Add the batch workspace UI: import, model selection, progress, review, and approval

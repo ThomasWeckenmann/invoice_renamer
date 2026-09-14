@@ -5,12 +5,17 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as analysesApi from "../../lib/api/analyses";
 import type { AnalysisJobView } from "../../lib/api/types";
+import type { ImportedFile } from "./types";
 import { useBatchWorkspace } from "./useBatchWorkspace";
 
 vi.mock("../../lib/api/analyses");
 
 function pdfFile(name = "invoice.pdf"): File {
   return new File(["%PDF-1.4"], name, { type: "application/pdf" });
+}
+
+function importedPdf(name = "invoice.pdf"): ImportedFile {
+  return { file: pdfFile(name), sourcePath: `/invoices/${name}` };
 }
 
 function queuedJob(overrides: Partial<AnalysisJobView> = {}): AnalysisJobView {
@@ -31,15 +36,16 @@ describe("useBatchWorkspace", () => {
     vi.resetAllMocks();
   });
 
-  it("addFiles keeps only PDFs", () => {
+  it("addFiles adds each imported file with its source path", () => {
     const { result } = renderHook(() => useBatchWorkspace());
 
     act(() => {
-      result.current.addFiles([pdfFile("a.pdf"), new File(["x"], "b.txt", { type: "text/plain" })]);
+      result.current.addFiles([importedPdf("a.pdf"), importedPdf("b.pdf")]);
     });
 
-    expect(result.current.items).toHaveLength(1);
+    expect(result.current.items).toHaveLength(2);
     expect(result.current.items[0].file.name).toBe("a.pdf");
+    expect(result.current.items[0].sourcePath).toBe("/invoices/a.pdf");
     expect(result.current.items[0].status).toBe("pending");
   });
 
@@ -67,7 +73,7 @@ describe("useBatchWorkspace", () => {
     );
 
     const { result } = renderHook(() => useBatchWorkspace());
-    act(() => result.current.addFiles([pdfFile()]));
+    act(() => result.current.addFiles([importedPdf()]));
 
     act(() => result.current.startAnalysis("granite-3.3-2b"));
     expect(result.current.items[0].status).toBe("queued");
@@ -85,7 +91,7 @@ describe("useBatchWorkspace", () => {
     vi.mocked(analysesApi.submitAnalysis).mockRejectedValue(new Error("model not installed"));
 
     const { result } = renderHook(() => useBatchWorkspace());
-    act(() => result.current.addFiles([pdfFile()]));
+    act(() => result.current.addFiles([importedPdf()]));
     act(() => result.current.startAnalysis("granite-3.3-2b"));
 
     await waitFor(() => expect(result.current.items[0].status).toBe("failed"));
@@ -94,7 +100,7 @@ describe("useBatchWorkspace", () => {
 
   it("editFilename overrides the proposed filename, and approve/unapprove toggle status", () => {
     const { result } = renderHook(() => useBatchWorkspace());
-    act(() => result.current.addFiles([pdfFile()]));
+    act(() => result.current.addFiles([importedPdf()]));
     const id = result.current.items[0].id;
 
     act(() => result.current.editFilename(id, "custom-name.pdf"));
@@ -112,7 +118,7 @@ describe("useBatchWorkspace", () => {
     vi.mocked(analysesApi.cancelJob).mockResolvedValue(queuedJob({ status: "cancelled" }));
 
     const { result } = renderHook(() => useBatchWorkspace());
-    act(() => result.current.addFiles([pdfFile()]));
+    act(() => result.current.addFiles([importedPdf()]));
     act(() => result.current.startAnalysis("granite-3.3-2b"));
     const id = result.current.items[0].id;
 
@@ -126,7 +132,7 @@ describe("useBatchWorkspace", () => {
 
   it("removeItem drops the item from the list", () => {
     const { result } = renderHook(() => useBatchWorkspace());
-    act(() => result.current.addFiles([pdfFile()]));
+    act(() => result.current.addFiles([importedPdf()]));
     const id = result.current.items[0].id;
 
     act(() => result.current.removeItem(id));
@@ -144,7 +150,7 @@ describe("useBatchWorkspace", () => {
     vi.mocked(analysesApi.cancelJob).mockResolvedValue(queuedJob({ status: "cancelled" }));
 
     const { result } = renderHook(() => useBatchWorkspace());
-    act(() => result.current.addFiles([pdfFile()]));
+    act(() => result.current.addFiles([importedPdf()]));
     const id = result.current.items[0].id;
 
     act(() => result.current.startAnalysis("granite-3.3-2b"));
@@ -180,7 +186,7 @@ describe("useBatchWorkspace", () => {
     vi.mocked(analysesApi.cancelJob).mockResolvedValue(queuedJob({ status: "cancelled" }));
 
     const { result } = renderHook(() => useBatchWorkspace());
-    act(() => result.current.addFiles([pdfFile()]));
+    act(() => result.current.addFiles([importedPdf()]));
     act(() => result.current.startAnalysis("granite-3.3-2b"));
     const id = result.current.items[0].id;
 

@@ -1,10 +1,12 @@
 /** Renders the imported batch as a list of BatchItemRow entries. */
 
+import type { RenameOutcome } from "../useRenameTransaction";
 import type { BatchItem } from "../types";
 import { BatchItemRow } from "./BatchItemRow";
 
 interface BatchListProps {
   items: BatchItem[];
+  renameOutcomes: Record<string, RenameOutcome>;
   onEditFilename: (id: string, filename: string) => void;
   onApprove: (id: string) => void;
   onUnapprove: (id: string) => void;
@@ -14,6 +16,7 @@ interface BatchListProps {
 
 export function BatchList({
   items,
+  renameOutcomes,
   onEditFilename,
   onApprove,
   onUnapprove,
@@ -30,6 +33,7 @@ export function BatchList({
         <BatchItemRow
           key={item.id}
           item={item}
+          renameOutcome={renameOutcomes[item.id]}
           onEditFilename={onEditFilename}
           onApprove={onApprove}
           onUnapprove={onUnapprove}

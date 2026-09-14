@@ -11,9 +11,17 @@ export type BatchItemStatus =
   | "failed"
   | "cancelled";
 
+/** A file captured with its real filesystem path, from the native open
+ * dialog or a window drop - the only sources that can provide one. */
+export interface ImportedFile {
+  file: File;
+  sourcePath: string;
+}
+
 export interface BatchItem {
   id: string;
   file: File;
+  sourcePath: string;
   status: BatchItemStatus;
   jobId: string | null;
   proposal: FilenameProposal | null;

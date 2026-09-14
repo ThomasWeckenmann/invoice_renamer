@@ -91,6 +91,10 @@
   color: #b91c1c;
 }
 
+.batch-item__renamed {
+  color: #15803d;
+}
+
 .batch-item__warnings {
   color: #92400e;
   font-size: 0.85rem;
@@ -103,10 +107,19 @@
 }
 
 .batch-workspace__commit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
   margin-top: 1rem;
 }
 
 .batch-workspace__note {
   font-size: 0.85rem;
   color: #666;
+  width: 100%;
+}
+
+.batch-workspace__note[role="alert"] {
+  color: #b91c1c;
 }

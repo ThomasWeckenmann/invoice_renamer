@@ -1,36 +1,97 @@
-/** Tests for the import dropzone: file-picker selection and drag-and-drop. */
+/** Tests for the import dropzone: native-dialog selection and window-level
+ * drag-and-drop, both of which must surface real filesystem paths. */
 
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ImportedFile } from "../types";
 import { ImportDropzone } from "./ImportDropzone";
 
-function pdfFile(name = "invoice.pdf"): File {
-  return new File(["%PDF-1.4"], name, { type: "application/pdf" });
+vi.mock("@tauri-apps/plugin-dialog", () => ({
+  open: vi.fn(),
+}));
+
+const mockedInvoke = vi.mocked(invoke);
+const mockedOpen = vi.mocked(open);
+const mockedGetCurrentWebview = vi.mocked(getCurrentWebview);
+
+function pdfBytes(): number[] {
+  return Array.from(new TextEncoder().encode("%PDF-1.4"));
 }
 
 describe("ImportDropzone", () => {
-  it("calls onFilesSelected when a file is chosen via the picker input", () => {
-    const onFilesSelected = vi.fn();
-    render(<ImportDropzone onFilesSelected={onFilesSelected} />);
-
-    const input = screen.getByLabelText("Choose PDF invoices");
-    const file = pdfFile();
-    fireEvent.change(input, { target: { files: [file] } });
-
-    expect(onFilesSelected).toHaveBeenCalledTimes(1);
-    const [files] = onFilesSelected.mock.calls[0] as [FileList];
-    expect(files[0]).toBe(file);
+  afterEach(() => {
+    vi.clearAllMocks();
   });
 
-  it("calls onFilesSelected on drop", () => {
-    const onFilesSelected = vi.fn();
-    const { container } = render(<ImportDropzone onFilesSelected={onFilesSelected} />);
+  it("reads bytes for each path chosen via the native dialog and reports them", async () => {
+    mockedOpen.mockResolvedValue(["/invoices/a.pdf", "/invoices/b.pdf"]);
+    mockedInvoke.mockResolvedValue(pdfBytes());
+    const onFilesImported = vi.fn();
 
-    const dropzone = container.querySelector(".import-dropzone");
-    expect(dropzone).not.toBeNull();
-    const file = pdfFile();
-    fireEvent.drop(dropzone as Element, { dataTransfer: { files: [file] } });
+    render(<ImportDropzone onFilesImported={onFilesImported} onImportError={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
 
-    expect(onFilesSelected).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onFilesImported).toHaveBeenCalledTimes(1));
+    const [imported] = onFilesImported.mock.calls[0] as [ImportedFile[]];
+    expect(imported).toHaveLength(2);
+    expect(imported[0]).toMatchObject({ sourcePath: "/invoices/a.pdf" });
+    expect(imported[0].file.name).toBe("a.pdf");
+    expect(mockedInvoke).toHaveBeenCalledWith("read_file_bytes", { path: "/invoices/a.pdf" });
+  });
+
+  it("does nothing when the dialog is cancelled", async () => {
+    mockedOpen.mockResolvedValue(null);
+    const onFilesImported = vi.fn();
+
+    render(<ImportDropzone onFilesImported={onFilesImported} onImportError={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
+
+    await waitFor(() => expect(mockedOpen).toHaveBeenCalled());
+    expect(onFilesImported).toHaveBeenCalledWith([]);
+  });
+
+  it("reports a read failure via onImportError instead of throwing", async () => {
+    mockedOpen.mockResolvedValue(["/invoices/a.pdf"]);
+    mockedInvoke.mockRejectedValue(new Error("permission denied"));
+    const onImportError = vi.fn();
+
+    render(<ImportDropzone onFilesImported={vi.fn()} onImportError={onImportError} />);
+    fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
+
+    await waitFor(() => expect(onImportError).toHaveBeenCalledWith("permission denied"));
+  });
+
+  it("imports PDF paths dropped on the window and ignores non-PDF paths", async () => {
+    type DragDropHandler = Parameters<ReturnType<typeof getCurrentWebview>["onDragDropEvent"]>[0];
+    let dragDropHandler: DragDropHandler | undefined;
+    mockedGetCurrentWebview.mockReturnValue({
+      onDragDropEvent: vi.fn((handler: DragDropHandler) => {
+        dragDropHandler = handler;
+        return Promise.resolve(() => {});
+      }),
+    } as unknown as ReturnType<typeof getCurrentWebview>);
+    mockedInvoke.mockResolvedValue(pdfBytes());
+    const onFilesImported = vi.fn();
+
+    render(<ImportDropzone onFilesImported={onFilesImported} onImportError={vi.fn()} />);
+    await waitFor(() => expect(dragDropHandler).toBeDefined());
+
+    dragDropHandler!({
+      event: "drag-drop",
+      id: 1,
+      payload: {
+        type: "drop",
+        paths: ["/invoices/dropped.pdf", "/invoices/notes.txt"],
+        position: { x: 0, y: 0 } as never,
+      },
+    });
+
+    await waitFor(() => expect(onFilesImported).toHaveBeenCalledTimes(1));
+    const [imported] = onFilesImported.mock.calls[0] as [ImportedFile[]];
+    expect(imported).toHaveLength(1);
+    expect(imported[0].sourcePath).toBe("/invoices/dropped.pdf");
   });
 });
