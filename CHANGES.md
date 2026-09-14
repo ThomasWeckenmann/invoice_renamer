@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 0.9.1 (2026-09-14, claude sonnet-5)
+
+- Confirm Qwen3-0.6B ships alongside Granite-3.3-2B-Instruct (default), re-validated against real invoices
+
+  The seller/product_summary scoring fix was re-run against real invoices and
+  confirmed correct (identical results to before the fix). Decided to ship
+  Qwen3-0.6B now despite its known accuracy gaps, to refine later rather than
+  gate on further validation. Findings: `docs/model_benchmark_findings.md`.
+
 ## Version 0.9.0 (2026-09-13, claude sonnet-5)
 
 - Add local invoice extraction: a Transformers backend, a benchmark harness, and a trimmed two-model catalog
