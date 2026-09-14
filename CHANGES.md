@@ -1,5 +1,13 @@
 # Changelog
 
+## Version 0.10.0 (2026-09-14, claude sonnet-5)
+
+- Add the model download/checksum/resume manager and its API routes
+
+  Local models can now be installed/removed (resumable per-file, sha256
+  verified) via GET /capabilities, GET /models, POST /models/{id}/download,
+  and DELETE /models/{id}. Frontend/UI wiring is out of scope here.
+
 ## Version 0.9.1 (2026-09-14, claude sonnet-5)
 
 - Confirm Qwen3-0.6B ships alongside Granite-3.3-2B-Instruct (default), re-validated against real invoices
