@@ -2,11 +2,14 @@
 
 `load` is the only place that talks to the Hugging Face Hub: it pins an exact
 revision and refuses `trust_remote_code`, so a catalog entry's repository can
-never resolve to code the app hasn't been told to trust.
+never resolve to code the app hasn't been told to trust. `load_installed`
+loads from a picker-managed local directory instead, with
+`local_files_only=True` enforced so it can never fall back to the network.
 """
 
 import re
 import sys
+from pathlib import Path
 
 import torch
 from transformers import (
@@ -17,9 +20,35 @@ from transformers import (
     TextStreamer,
 )
 
+from invoice_renamer.models.catalog import ModelCatalogEntry
+from invoice_renamer.models.installer import install_dir_for
+
 # HF repos are git repos; a real pinned revision is a full 40-hex-char commit
 # SHA. Anything else (a branch, a tag, a short hash) can move underneath us.
 _PINNED_REVISION = re.compile(r"^[0-9a-f]{40}$")
+
+
+def _load_model_and_tokenizer(
+    source: str, *, revision: str | None, local_files_only: bool, device: str
+) -> tuple[PreTrainedModel, PreTrainedTokenizerBase]:
+    # local_files_only is only passed at all when true, so load()'s calls stay
+    # byte-for-byte identical to before this helper existed - no unrelated
+    # kwarg for a regression test (or a future caller inspecting call args) to
+    # trip over on the hub-loading path.
+    extra_kwargs: dict[str, object] = {"local_files_only": True} if local_files_only else {}
+    tokenizer = AutoTokenizer.from_pretrained(
+        source, revision=revision, trust_remote_code=False, **extra_kwargs
+    )
+    model = AutoModelForCausalLM.from_pretrained(
+        source, revision=revision, dtype=torch.bfloat16, trust_remote_code=False, **extra_kwargs
+    )
+    model.to(device)  # type: ignore[arg-type]
+    model.eval()  # type: ignore[no-untyped-call]
+    # Confirms where the weights actually landed instead of trusting the
+    # requested device - .to() can silently no-op if the backend rejects it.
+    actual_device = next(model.parameters()).device
+    print(f"[TransformersExtractor] model loaded on device: {actual_device}", file=sys.stderr)
+    return model, tokenizer
 
 
 class TransformersExtractor:
@@ -54,18 +83,33 @@ class TransformersExtractor:
         if not _PINNED_REVISION.match(revision):
             raise ValueError(f"revision must be a full 40-character commit hash, got {revision!r}")
 
-        tokenizer = AutoTokenizer.from_pretrained(
-            repository, revision=revision, trust_remote_code=False
+        model, tokenizer = _load_model_and_tokenizer(
+            repository, revision=revision, local_files_only=False, device=device
         )
-        model = AutoModelForCausalLM.from_pretrained(
-            repository, revision=revision, dtype=torch.bfloat16, trust_remote_code=False
+        return cls(
+            model,
+            tokenizer,
+            device=device,
+            max_new_tokens=max_new_tokens,
+            repetition_penalty=repetition_penalty,
+            stream=stream,
         )
-        model.to(device)  # type: ignore[arg-type]
-        model.eval()  # type: ignore[no-untyped-call]
-        # Confirms where the weights actually landed instead of trusting the
-        # requested device - .to() can silently no-op if the backend rejects it.
-        actual_device = next(model.parameters()).device
-        print(f"[TransformersExtractor] model loaded on device: {actual_device}", file=sys.stderr)
+
+    @classmethod
+    def load_installed(
+        cls,
+        entry: ModelCatalogEntry,
+        data_dir: Path,
+        *,
+        device: str = "cpu",
+        max_new_tokens: int = 512,
+        repetition_penalty: float = 1.15,
+        stream: bool = False,
+    ) -> "TransformersExtractor":
+        install_dir = install_dir_for(entry, data_dir)
+        model, tokenizer = _load_model_and_tokenizer(
+            str(install_dir), revision=None, local_files_only=True, device=device
+        )
         return cls(
             model,
             tokenizer,

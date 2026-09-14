@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 0.11.0 (2026-09-14, claude sonnet-5)
+
+- Add the invoice analysis pipeline and its job API
+
+  POST /analyses, GET /jobs/{id}, and DELETE /jobs/{id} run an uploaded PDF
+  through read -> extract -> filename-proposal on one serialized worker
+  thread. Load installed models locally and defer heavy inference imports
+  until needed so worker startup stays fast.
+
 ## Version 0.10.0 (2026-09-14, claude sonnet-5)
 
 - Add the model download/checksum/resume manager and its API routes

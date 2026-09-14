@@ -2,13 +2,30 @@
 so these run without downloading real weights.
 """
 
+from pathlib import Path
+
 import pytest
 import torch
 from pytest import mark, raises
 
 from invoice_renamer.inference.transformers_extractor import TransformersExtractor
+from invoice_renamer.models.catalog import MemoryTier, ModelCatalogEntry, ModelFile, ModelKind
+from invoice_renamer.models.installer import install_dir_for
 
 _VALID_REVISION = "a" * 40
+
+
+def _entry() -> ModelCatalogEntry:
+    return ModelCatalogEntry(
+        id="tiny-model",
+        display_name="Tiny Model",
+        kind=ModelKind.OPEN_LOCAL,
+        license="apache-2.0",
+        repository="example-org/tiny-model",
+        revision=_VALID_REVISION,
+        memory_tier=MemoryTier.SMALL,
+        files=[ModelFile(path="model.bin", sha256="a" * 64, size_bytes=1)],
+    )
 
 
 class _FakeEncoding(dict[str, torch.Tensor]):
@@ -211,3 +228,104 @@ def test_load_accepts_a_pinned_commit_hash_format() -> None:
     from invoice_renamer.inference.transformers_extractor import _PINNED_REVISION
 
     assert _PINNED_REVISION.match(_VALID_REVISION)
+
+
+class _FakeParam:
+    device = "cpu"
+
+
+class _FakeLoadedModel:
+    def to(self, device: str) -> "_FakeLoadedModel":
+        return self
+
+    def eval(self) -> None:
+        pass
+
+    def parameters(self) -> object:
+        return iter([_FakeParam()])
+
+
+def _patch_from_pretrained(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[list[tuple[str, dict[str, object]]], list[tuple[str, dict[str, object]]]]:
+    tokenizer_calls: list[tuple[str, dict[str, object]]] = []
+    model_calls: list[tuple[str, dict[str, object]]] = []
+
+    def fake_tokenizer_from_pretrained(source: str, **kwargs: object) -> object:
+        tokenizer_calls.append((source, kwargs))
+        return object()
+
+    def fake_model_from_pretrained(source: str, **kwargs: object) -> _FakeLoadedModel:
+        model_calls.append((source, kwargs))
+        return _FakeLoadedModel()
+
+    monkeypatch.setattr(
+        "invoice_renamer.inference.transformers_extractor.AutoTokenizer.from_pretrained",
+        fake_tokenizer_from_pretrained,
+    )
+    monkeypatch.setattr(
+        "invoice_renamer.inference.transformers_extractor.AutoModelForCausalLM.from_pretrained",
+        fake_model_from_pretrained,
+    )
+    return tokenizer_calls, model_calls
+
+
+def test_load_installed_resolves_install_dir_and_forces_local_files_only(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry = _entry()
+    install_dir = install_dir_for(entry, tmp_path)
+    tokenizer_calls, model_calls = _patch_from_pretrained(monkeypatch)
+
+    TransformersExtractor.load_installed(entry, tmp_path, device="cpu")
+
+    assert tokenizer_calls[0] == (
+        str(install_dir),
+        {"revision": None, "trust_remote_code": False, "local_files_only": True},
+    )
+    assert model_calls[0][0] == str(install_dir)
+    assert model_calls[0][1]["local_files_only"] is True
+    assert model_calls[0][1]["revision"] is None
+
+
+def test_load_still_calls_from_pretrained_with_the_hub_repository_and_no_local_files_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Regression guard: load()'s own from_pretrained calls must stay exactly
+    # as before load_installed() was added - the direct-from-hub path used by
+    # scripts/benchmark_models.py is untouched by this change.
+    tokenizer_calls, model_calls = _patch_from_pretrained(monkeypatch)
+
+    TransformersExtractor.load("some/repo", _VALID_REVISION)
+
+    assert tokenizer_calls[0] == (
+        "some/repo",
+        {"revision": _VALID_REVISION, "trust_remote_code": False},
+    )
+    assert "local_files_only" not in model_calls[0][1]
+    assert model_calls[0][0] == "some/repo"
+
+
+def test_load_installed_defaults_stream_to_false(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # The concrete regression test for the invoice-content-in-logs concern:
+    # load()'s interactive default (stream=True) must not leak into
+    # load_installed()'s production path.
+    _patch_from_pretrained(monkeypatch)
+    entry = _entry()
+
+    extractor = TransformersExtractor.load_installed(entry, tmp_path)
+
+    assert extractor._stream is False
+
+
+def test_load_installed_stream_can_be_re_enabled_explicitly(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _patch_from_pretrained(monkeypatch)
+    entry = _entry()
+
+    extractor = TransformersExtractor.load_installed(entry, tmp_path, stream=True)
+
+    assert extractor._stream is True

@@ -56,3 +56,22 @@ def test_ready_marker_is_printed_after_successful_bind() -> None:
     output = _run_worker(port)
 
     assert READY_MARKER in output
+
+
+def test_app_creation_does_not_import_the_inference_stack(tmp_path: Path) -> None:
+    env = os.environ.copy()
+    env["INVOICE_RENAMER_DATA_DIR"] = str(tmp_path)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; from invoice_renamer.api.app import create_app; create_app(); "
+            'assert "torch" not in sys.modules; assert "transformers" not in sys.modules',
+        ],
+        cwd=SRC_DIR,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    assert result.returncode == 0, result.stderr
