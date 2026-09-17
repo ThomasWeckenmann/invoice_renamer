@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 0.16.0 (2026-09-17, claude sonnet-5)
+
+- Enable release app bundling and document self-build steps in README.md
+
+  Flips bundle.active to true; cargo tauri build now produces a real
+  .app (verified on macOS) or deb/appimage/rpm on Linux. A macOS-only
+  config skips .dmg generation, which isn't needed and failed locally.
+  README.md documents the build steps and prerequisites.
+
 ## Version 0.15.0 (2026-09-17, claude sonnet-5)
 
 - Generate macOS/Linux Tauri icons from the new app logo
