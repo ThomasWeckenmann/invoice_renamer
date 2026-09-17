@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from invoice_renamer.api import analyses_routes
 from invoice_renamer.api.app import create_app
 from invoice_renamer.inference.transformers_extractor import TransformersExtractor
-from invoice_renamer.models.catalog import MemoryTier, ModelCatalogEntry, ModelFile, ModelKind
+from invoice_renamer.models.catalog import MemoryTier, ModelCatalogEntry, ModelFile
 from invoice_renamer.models.installer import _marker_payload, install_dir_for
 
 TOKEN = "test-session-token"
@@ -40,7 +40,6 @@ def _entry(model_id: str) -> ModelCatalogEntry:
     return ModelCatalogEntry(
         id=model_id,
         display_name=model_id,
-        kind=ModelKind.OPEN_LOCAL,
         license="apache-2.0",
         repository=f"example-org/{model_id}",
         revision="a" * 40,

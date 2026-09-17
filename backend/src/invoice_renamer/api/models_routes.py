@@ -159,10 +159,7 @@ def _status_entry(
 ) -> ModelStatusEntry:
     status = coordinator.status_for(entry)
     installed_ids = {entry.id} if status is InstallStatus.INSTALLED else set()
-    # no cloud-key infra exists yet, no CLOSED_CLOUD entries in the real catalog today
-    [picked] = build_model_picker(
-        [entry], installed_ids=installed_ids, capabilities=capabilities, has_cloud_key=False
-    )
+    [picked] = build_model_picker([entry], installed_ids=installed_ids, capabilities=capabilities)
     picked.status = status
 
     progress = coordinator.progress_for(entry.id)

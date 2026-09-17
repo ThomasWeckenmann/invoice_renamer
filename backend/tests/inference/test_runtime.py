@@ -8,14 +8,13 @@ import pytest
 from invoice_renamer.inference.runtime import ModelRuntime, select_device
 from invoice_renamer.inference.transformers_extractor import TransformersExtractor
 from invoice_renamer.models.capabilities import AccelerationBackend, SystemCapabilities
-from invoice_renamer.models.catalog import MemoryTier, ModelCatalogEntry, ModelFile, ModelKind
+from invoice_renamer.models.catalog import MemoryTier, ModelCatalogEntry, ModelFile
 
 
 def _entry(model_id: str = "model-a", revision: str = "a" * 40) -> ModelCatalogEntry:
     return ModelCatalogEntry(
         id=model_id,
         display_name=model_id,
-        kind=ModelKind.OPEN_LOCAL,
         license="apache-2.0",
         repository=f"example-org/{model_id}",
         revision=revision,

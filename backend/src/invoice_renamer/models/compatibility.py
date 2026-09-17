@@ -3,7 +3,7 @@
 from pydantic import BaseModel, Field
 
 from invoice_renamer.models.capabilities import SystemCapabilities
-from invoice_renamer.models.catalog import MemoryTier, ModelCatalogEntry, ModelKind
+from invoice_renamer.models.catalog import MemoryTier, ModelCatalogEntry
 
 _BYTES_PER_GB = 1024**3
 
@@ -24,10 +24,6 @@ class CompatibilityResult(BaseModel):
 def check_compatibility(
     entry: ModelCatalogEntry, capabilities: SystemCapabilities, *, is_installed: bool = False
 ) -> CompatibilityResult:
-    if entry.kind is ModelKind.CLOSED_CLOUD:
-        return CompatibilityResult(compatible=True)
-
-    assert entry.memory_tier is not None  # enforced by ModelCatalogEntry validation
     reasons = []
 
     minimum_gb = _MEMORY_TIER_MINIMUMS_GB[entry.memory_tier]

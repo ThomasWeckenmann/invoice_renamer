@@ -40,3 +40,6 @@ local_benchmark_data/
 
 # Model weights (download separately)
 backend/models/
+
+# Temp folder
+_temp

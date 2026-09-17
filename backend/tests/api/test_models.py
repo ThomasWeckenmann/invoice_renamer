@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from invoice_renamer.api import models_routes
 from invoice_renamer.api.app import create_app
-from invoice_renamer.models.catalog import MemoryTier, ModelCatalogEntry, ModelFile, ModelKind
+from invoice_renamer.models.catalog import MemoryTier, ModelCatalogEntry, ModelFile
 from invoice_renamer.models.installer import install_dir_for
 
 TOKEN = "test-session-token"
@@ -24,7 +24,6 @@ def _small_catalog() -> list[ModelCatalogEntry]:
         ModelCatalogEntry(
             id=_MODEL_ID,
             display_name="Tiny Model",
-            kind=ModelKind.OPEN_LOCAL,
             license="apache-2.0",
             repository="example-org/tiny-model",
             revision="abc123",
@@ -356,7 +355,6 @@ def test_path_traversal_file_never_writes_outside_tmp_path(
         ModelCatalogEntry(
             id=_MODEL_ID,
             display_name="Tiny Model",
-            kind=ModelKind.OPEN_LOCAL,
             license="apache-2.0",
             repository="example-org/tiny-model",
             revision="abc123",

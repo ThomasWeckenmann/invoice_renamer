@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 0.14.0 (2026-09-17, claude sonnet-5)
+
+- Remove closed/cloud model support and drop the catalog's kind field
+
+  The model catalog, picker, and API now describe local models only; kind,
+  provider, context_window, and requires_cloud_key are gone from both the
+  Python/TypeScript contracts and the model picker UI (one flat list, no
+  open/closed split). R&D and implementation-plan docs updated to match.
+
 ## Version 0.13.0 (2026-09-14, claude sonnet-5)
 
 - Add the file rename transaction and Undo (BB-11), with native file import to unblock it

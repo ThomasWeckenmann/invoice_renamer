@@ -1,5 +1,5 @@
-"""Builds the model-picker view: catalog entries joined with status,
-hardware compatibility, and (for closed models) cloud-key availability.
+"""Builds the model-picker view: catalog entries joined with status and
+hardware compatibility.
 """
 
 from enum import Enum
@@ -7,7 +7,7 @@ from enum import Enum
 from pydantic import BaseModel
 
 from invoice_renamer.models.capabilities import SystemCapabilities
-from invoice_renamer.models.catalog import ModelCatalogEntry, ModelKind
+from invoice_renamer.models.catalog import ModelCatalogEntry
 from invoice_renamer.models.compatibility import check_compatibility
 
 
@@ -23,8 +23,6 @@ class ModelPickerEntry(BaseModel):
     status: InstallStatus
     compatible: bool
     compatibility_reasons: list[str]
-    # Closed models stay visible but disabled until a cloud key is configured.
-    requires_cloud_key: bool
 
 
 def build_model_picker(
@@ -32,7 +30,6 @@ def build_model_picker(
     *,
     installed_ids: set[str],
     capabilities: SystemCapabilities,
-    has_cloud_key: bool,
 ) -> list[ModelPickerEntry]:
     entries = []
     for entry in catalog:
@@ -45,7 +42,6 @@ def build_model_picker(
                 status=status,
                 compatible=compatibility.compatible,
                 compatibility_reasons=compatibility.reasons,
-                requires_cloud_key=(entry.kind is ModelKind.CLOSED_CLOUD and not has_cloud_key),
             )
         )
     return entries

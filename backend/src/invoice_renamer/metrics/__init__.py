@@ -1,1 +1,1 @@
-"""Per-run timing, execution-path, and cost metrics for a completed analysis job."""
+"""Per-run timing metrics for a completed analysis job."""

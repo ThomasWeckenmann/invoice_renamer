@@ -9,7 +9,7 @@ import torch
 from pytest import mark, raises
 
 from invoice_renamer.inference.transformers_extractor import TransformersExtractor
-from invoice_renamer.models.catalog import MemoryTier, ModelCatalogEntry, ModelFile, ModelKind
+from invoice_renamer.models.catalog import MemoryTier, ModelCatalogEntry, ModelFile
 from invoice_renamer.models.installer import install_dir_for
 
 _VALID_REVISION = "a" * 40
@@ -19,7 +19,6 @@ def _entry() -> ModelCatalogEntry:
     return ModelCatalogEntry(
         id="tiny-model",
         display_name="Tiny Model",
-        kind=ModelKind.OPEN_LOCAL,
         license="apache-2.0",
         repository="example-org/tiny-model",
         revision=_VALID_REVISION,

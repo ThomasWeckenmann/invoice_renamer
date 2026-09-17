@@ -5,12 +5,11 @@ per-file LFS sha256/size) at the pinned revision, not invented; re-verify
 against the repository before bumping a revision.
 """
 
-from invoice_renamer.models.catalog import MemoryTier, ModelCatalogEntry, ModelFile, ModelKind
+from invoice_renamer.models.catalog import MemoryTier, ModelCatalogEntry, ModelFile
 
 GRANITE_3_3_2B_INSTRUCT = ModelCatalogEntry(
     id="granite-3.3-2b-instruct",
     display_name="Granite 3.3 2B Instruct",
-    kind=ModelKind.OPEN_LOCAL,
     license="Apache 2.0",
     repository="ibm-granite/granite-3.3-2b-instruct",
     revision="707f574c62054322f6b5b04b6d075f0a8f05e0f0",
@@ -78,7 +77,6 @@ GRANITE_3_3_2B_INSTRUCT = ModelCatalogEntry(
 QWEN3_0_6B = ModelCatalogEntry(
     id="qwen3-0.6b",
     display_name="Qwen3 0.6B",
-    kind=ModelKind.OPEN_LOCAL,
     license="Apache 2.0",
     repository="Qwen/Qwen3-0.6B",
     revision="c1899de289a04d12100db370d81485cdf75e47ca",

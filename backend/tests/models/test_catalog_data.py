@@ -4,7 +4,6 @@ import re
 from pathlib import Path
 
 from invoice_renamer.models.capabilities import AccelerationBackend, SystemCapabilities
-from invoice_renamer.models.catalog import ModelKind
 from invoice_renamer.models.catalog_data import SHORTLISTED_CATALOG
 from invoice_renamer.models.compatibility import check_compatibility
 from invoice_renamer.models.installer import _resolve_file_path, install_dir_for
@@ -16,10 +15,6 @@ _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 def test_entries_have_unique_ids() -> None:
     ids = [entry.id for entry in SHORTLISTED_CATALOG]
     assert len(ids) == len(set(ids))
-
-
-def test_entries_are_open_local() -> None:
-    assert all(entry.kind is ModelKind.OPEN_LOCAL for entry in SHORTLISTED_CATALOG)
 
 
 def test_entries_pin_a_real_commit_revision_not_a_floating_ref() -> None:

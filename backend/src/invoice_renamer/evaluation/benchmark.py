@@ -23,7 +23,7 @@ from invoice_renamer.documents.reader import read_document
 from invoice_renamer.extraction.models import InvoiceExtraction
 from invoice_renamer.inference.extractor import extract_invoice
 from invoice_renamer.inference.language_model import LanguageModel
-from invoice_renamer.metrics.models import ExecutionMode, RunMetrics
+from invoice_renamer.metrics.models import RunMetrics
 
 SCORED_FIELDS = ("invoice_date", "seller", "product_summary", "gross_total", "currency")
 
@@ -250,7 +250,6 @@ def _crashed_invoice_result(
         pdf_extraction_ms=pdf_extraction_ms,
         ocr_ms=ocr_ms,
         inference_ms=inference_ms,
-        execution_mode=ExecutionMode.LOCAL,
         model_id=model_id,
         provider="transformers",
         model_revision=model_revision,
@@ -322,7 +321,6 @@ def run_invoice(
         pdf_extraction_ms=pdf_extraction_ms,
         ocr_ms=ocr_ms,
         inference_ms=inference_ms,
-        execution_mode=ExecutionMode.LOCAL,
         model_id=model_id,
         provider="transformers",
         model_revision=model_revision,

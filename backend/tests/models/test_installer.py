@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from invoice_renamer.models import installer
-from invoice_renamer.models.catalog import MemoryTier, ModelCatalogEntry, ModelFile, ModelKind
+from invoice_renamer.models.catalog import MemoryTier, ModelCatalogEntry, ModelFile
 from invoice_renamer.models.installer import (
     ChecksumMismatch,
     InstallCancelled,
@@ -31,7 +31,6 @@ def _entry(file_contents: dict[str, bytes] | None = None, **overrides: object) -
     defaults: dict[str, object] = {
         "id": "example-open-small",
         "display_name": "Example Open Model (Small)",
-        "kind": ModelKind.OPEN_LOCAL,
         "license": "apache-2.0",
         "repository": "example-org/example-model",
         "revision": "abc123",

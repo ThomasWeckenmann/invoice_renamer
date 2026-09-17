@@ -1,4 +1,4 @@
-"""Catalog contract describing every model the app supports, open or closed.
+"""Catalog contract describing every local model the app supports.
 
 The concrete catalog contents (which real models are listed) are decided by
 benchmarking, not by this schema; nothing here is a shipped model list.
@@ -6,16 +6,11 @@ benchmarking, not by this schema; nothing here is a shipped model list.
 
 from enum import Enum
 
-from pydantic import BaseModel, Field, field_validator, model_validator
-
-
-class ModelKind(str, Enum):
-    OPEN_LOCAL = "open_local"
-    CLOSED_CLOUD = "closed_cloud"
+from pydantic import BaseModel, Field, field_validator
 
 
 class MemoryTier(str, Enum):
-    """Rough resource class an open/local model falls into, not a precise figure."""
+    """Rough resource class a model falls into, not a precise figure."""
 
     SMALL = "small"
     MEDIUM = "medium"
@@ -38,31 +33,13 @@ class ModelFile(BaseModel):
 class ModelCatalogEntry(BaseModel):
     id: str
     display_name: str
-    kind: ModelKind
     license: str
-
-    # Open/local-only metadata.
-    repository: str | None = None
-    revision: str | None = None
-    files: list[ModelFile] = Field(default_factory=list)
-    memory_tier: MemoryTier | None = None
+    repository: str = Field(min_length=1)
+    revision: str = Field(min_length=1)
+    files: list[ModelFile] = Field(min_length=1)
+    memory_tier: MemoryTier
     prompt_template: str | None = None
-
-    # Closed/cloud-only metadata.
-    provider: str | None = None
-    context_window: int | None = None
 
     @property
     def total_size_bytes(self) -> int:
         return sum(file.size_bytes for file in self.files)
-
-    @model_validator(mode="after")
-    def _validate_kind_specific_fields(self) -> "ModelCatalogEntry":
-        if self.kind is ModelKind.OPEN_LOCAL:
-            if not self.repository or not self.revision or not self.files or not self.memory_tier:
-                raise ValueError(
-                    "open_local entries require repository, revision, files, and memory_tier"
-                )
-        elif not self.provider:
-            raise ValueError("closed_cloud entries require a provider")
-        return self

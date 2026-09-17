@@ -10,7 +10,7 @@ from invoice_renamer.documents.ocr import OcrEngine, OcrResult, TesseractOcrEngi
 from invoice_renamer.documents.reader import read_document
 from invoice_renamer.inference.extractor import extract_invoice
 from invoice_renamer.inference.language_model import LanguageModel
-from invoice_renamer.metrics.models import ExecutionMode, RunMetrics
+from invoice_renamer.metrics.models import RunMetrics
 from invoice_renamer.naming.builder import build_filename_proposal
 from invoice_renamer.naming.schema import FilenameProposal
 
@@ -58,7 +58,6 @@ def run_document_analysis(
         pdf_extraction_ms=pdf_extraction_ms,
         ocr_ms=ocr_ms,
         inference_ms=inference_ms,
-        execution_mode=ExecutionMode.LOCAL,
         model_id=model_id,
         provider="transformers",
         model_revision=model_revision,

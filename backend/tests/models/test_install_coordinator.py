@@ -9,7 +9,7 @@ from fastapi import BackgroundTasks, HTTPException
 
 from invoice_renamer.api import models_routes
 from invoice_renamer.api.models_routes import ModelInstallCoordinator
-from invoice_renamer.models.catalog import MemoryTier, ModelCatalogEntry, ModelFile, ModelKind
+from invoice_renamer.models.catalog import MemoryTier, ModelCatalogEntry, ModelFile
 from invoice_renamer.models.picker import InstallStatus
 
 
@@ -17,7 +17,6 @@ def _entry(**overrides: object) -> ModelCatalogEntry:
     defaults: dict[str, object] = {
         "id": "example-open-small",
         "display_name": "Example Open Model (Small)",
-        "kind": ModelKind.OPEN_LOCAL,
         "license": "apache-2.0",
         "repository": "example-org/example-model",
         "revision": "abc123",

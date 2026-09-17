@@ -8,7 +8,7 @@ Build a macOS and Linux desktop app that analyzes German and English invoice PDF
 
 Example: `2026-09-12_Apple_MacBook-Air_2180-EUR.pdf`
 
-The app processes locally by default, previews all proposals, renames approved originals, and supports Undo. Cloud analysis through OpenRouter is always explicit.
+The app processes invoices locally, previews all proposals, renames approved originals, and supports Undo.
 
 ## Progress so far
 
@@ -22,15 +22,15 @@ Written for picking this project back up in a fresh session; update it as work c
   - **Decided: Granite-3.3-2B-Instruct ships as the default; Qwen3-0.6B ships too.** Qwen3-0.6B needed correction on all 5 test invoices, including a silent malformed-number miss (`21.42` → `2142`, no warning raised) — accepted as a known limitation to fine-tune later, not a blocker.
   - A `seller`/`product_summary` scoring bug (`evaluation/benchmark.py::_values_match` was accepting a bidirectional substring match, so a vague/truncated wrong answer like `seller="a"` could score as correct against `"MediaMarkt"`) was fixed and re-confirmed against real invoices — the corrected one-directional/word-boundary matcher produced identical results to before the fix, so this bug didn't happen to affect these 5 invoices, but was worth fixing regardless.
   - The picker (`models/picker.py`) is wired to a real download/checksum/resume manager (`models/installer.py`, `api/models_routes.py`; design + rationale in `docs/plans_open/02_model-download-manager.md`): file-level resume, per-file sha256 re-verification, an atomic revision-scoped marker file so a crash mid-install is never misclassified as installed, and a lock-guarded `ModelInstallCoordinator` so concurrent download/cancel/delete requests for the same model can't race. Routes: `GET /capabilities`, `GET /models`, `POST /models/{id}/download`, `DELETE /models/{id}`. Manually smoke-tested end to end on real macOS hardware against the real Qwen3-0.6B repo (download → checksum verify → install → delete), all as expected.
-  - **Start here next**: Milestone 5 (cloud option) — BB-08/12/13, now that Milestone 4 is code-complete pending macOS verification (see below).
+  - **Start here next**: Milestone 5 (release hardening) — BB-14 and full system, now that Milestones 1-4 are functionally complete. Milestone 2's ZUGFeRD field-parsing gap and Milestone 4's known review-banner bug (below) remain open as minor follow-ups. The cloud option milestone (formerly Milestone 5, BB-08/12/13) is dropped: the app is local-only now, no OpenRouter/closed-model support.
 - Backend verification (`cd backend`): `uv run pytest` (231 tests as of this writing), `uv run ruff format --check src tests`, `uv run ruff check src tests`, `uv run mypy src` — all green. Running the OCR tests requires `tesseract-ocr` + `tesseract-ocr-deu` installed locally (`brew install tesseract tesseract-lang` on macOS).
-- **Milestone 4 — BB-10 and BB-11 done, verified on real macOS hardware.** Approve → rename → Undo confirmed working end to end by the user on their Mac (2026-09-14), including the native dialog and Undo actually reversing a rename. `app/src/lib/api/` is a hand-authored TypeScript mirror of the worker's Pydantic contracts (no OpenAPI codegen exists yet, so this isn't the `types/generated/` the repo-structure sketch describes) plus a fetch client that resolves the session endpoint via the existing `get_worker_endpoint` Tauri command. `app/src/features/batch/` covers PDF import, model selection grouped Open/Local vs Closed/Cloud with live download/remove controls and progress polling (`useModelCatalog`), job submission with per-item status polling (`useBatchWorkspace`), an editable-filename review list with extracted fields/warnings, per-item/approve-all approval, and the rename-and-Undo transaction (`useRenameTransaction`). 42 Vitest tests pass; `npm run lint` and `npm run build` (tsc + vite) are clean.
+- **Milestone 4 — BB-10 and BB-11 done, verified on real macOS hardware.** Approve → rename → Undo confirmed working end to end by the user on their Mac (2026-09-14), including the native dialog and Undo actually reversing a rename. `app/src/lib/api/` is a hand-authored TypeScript mirror of the worker's Pydantic contracts (no OpenAPI codegen exists yet, so this isn't the `types/generated/` the repo-structure sketch describes) plus a fetch client that resolves the session endpoint via the existing `get_worker_endpoint` Tauri command. `app/src/features/batch/` covers PDF import, model selection (a single local-model list, with live download/remove controls and progress polling via `useModelCatalog` — the catalog's earlier Open/Local vs Closed/Cloud grouping was removed 2026-09-17 along with all closed/cloud-model support), job submission with per-item status polling (`useBatchWorkspace`), an editable-filename review list with extracted fields/warnings, per-item/approve-all approval, and the rename-and-Undo transaction (`useRenameTransaction`). Vitest tests pass; `npm run lint` and `npm run build` (tsc + vite) are clean.
   - **BB-11 (`src-tauri/src/commands/rename.rs`, `src-tauri/src/history/`, `src-tauri/src/fs_atomic.rs`)**: `rename_batch` re-checks every source exists immediately before renaming anything (abort-all if one is missing), resolves same-directory destination collisions by appending `(n)` before the extension, then renames each item independently through `fs_atomic::rename_no_replace` so one OS-level failure (permissions, a mid-flight race) doesn't block the rest of the batch. Successful renames are persisted to `<app-data>/rename_history.json` keyed by Unix-device/inode identity. `undo_last_rename_batch` validates every recorded entry's identity and destination availability before reversing anything, reverses independently through the same primitive, and leaves any entry that fails at the OS level in the record for a retry rather than losing track of it. `get_last_batch_summary` lets the UI show Undo availability on load/reload. Pure logic (`resolve_destination`, `preflight`, filename validation, `fs_atomic`, history load/save) has Rust unit tests; the commands themselves need a real Tauri app context and are untested beyond that.
   - **Fixed after two rounds of external review, six real bugs total** (all confirmed and fixed, most verified by new tests reproducing each): (1) `fs::rename` silently overwrites an existing destination, including a dangling symlink that `Path::exists` can't even see past preflight's check - both rename and Undo now go through `fs_atomic::rename_no_replace`. (1a) The first fix attempt used `libc::linkat` (hard-link the destination) then `libc::unlink` (remove the source) - review round two correctly caught that this pair isn't atomic either: a file written to the source *between* those two calls gets silently deleted by the unlink. Replaced with the real single-syscall primitives - `renameat2`/`RENAME_NOREPLACE` on Linux, `renamex_np`/`RENAME_EXCL` on macOS - which the kernel itself refuses atomically if the destination is occupied, no window at all; `resolve_destination`'s pre-check also switched from `exists()` to `symlink_metadata()` so it stops proposing names a dangling symlink already occupies. (2) A history-file write/load failure after files were already renamed used to propagate via `?` and discard the real per-file results together with the error - `rename_batch`/`undo_last_rename_batch` now always return what actually happened on disk, with a new `history_warning` field carrying the tracking failure separately; history writes are also now atomic (temp file + rename) instead of a direct truncating write. (2a) Review round two also caught that a *successful* rename whose `file_identity()` call failed right after (untracked for Undo) was reported as plain success with no warning at all - that path now folds into `history_warning` too, aggregated with any batch-level history-save failure. (3) The frontend correlated `rename_batch` results back to UI rows by `source_path`, which collapses when an import has a duplicate path; `RenameItemInput`/results now carry an explicit `request_id` (the batch item's own id) so duplicate paths correlate correctly regardless. (4) `useRenameTransaction`'s Undo handler only ever looked at `"renamed"` results and never checked for `"failed"` ones, so a per-file Undo failure returned by a *successful* command call produced no `undoError` at all - it now surfaces those via `undoError`, combined with any `history_warning`.
   - **This also closes BB-10's known path-capture gap**, since BB-11 needs real source paths to rename originals: `ImportDropzone` now gets them from `@tauri-apps/plugin-dialog`'s path-returning `open()` (replacing the plain `<input type=file>`, which can never expose a path) and from `@tauri-apps/api/webview`'s `onDragDropEvent` (replacing the HTML5 `drop` handler, which — confirmed live on macOS earlier — never fires for real files because Tauri intercepts native OS drag-drop before it reaches the DOM). Bytes for upload are read back through a new custom Rust command, `read_file_bytes`, deliberately not the `tauri-plugin-fs` plugin — the fs plugin's ACL scope does not auto-extend to dialog-selected paths (confirmed against the Tauri v2 docs), while a plain `#[tauri::command]` using `std::fs::read` is exempt from that scope system entirely and needs no capability entry, matching how `get_worker_endpoint` already works. Only `dialog:default` was added to `capabilities/default.json`; the drag-drop event and the custom read command needed no capability changes.
   - **Verification note, corrected while writing this entry**: `cargo` looked unavailable at first (`which cargo` fails, `crates.io` returns HTTP 403) because this sandbox's default shell PATH omits it, not because it's actually missing — it's installed via rustup at `~/.cargo/bin` and works once that's on PATH. With that fix, `cargo build`, `cargo test --lib` (27/27 passing across `commands::rename`, `fs_atomic`, and `history`), `cargo fmt --check`, and `cargo clippy --lib -- -D warnings` all pass clean for the full crate (lib + bin target), including the new `tauri-plugin-dialog` dependency — so the general dev-environment note above ("the Tauri desktop shell... cannot be built... in that environment") is stale and should be re-checked before being repeated; add `export PATH="$HOME/.cargo/bin:$PATH"` first. **Update**: the user has since run the real app on macOS and confirmed import → analyze → approve → rename → Undo all work end to end (real native dialog, real rename, real Undo reversal). Not yet specifically confirmed: Undo surviving an app restart (the persisted-history read path), and collision handling against a real pre-existing file. `ocrmac`/MPS/signing remain real macOS-only concerns, still unverified.
   - **Known bug, deferred (found 2026-09-14 during the macOS pass above)**: the review-list warning banner "Missing required fields — please review before approving." (`BatchItemRow.tsx`) is shown any time `FilenameProposal.requires_review` is true, but that flag is *not* only about missing fields - `naming/builder.py`'s `build_filename_proposal` also forces it true whenever `extraction.warnings` is non-empty (`requires_review = date_missing or seller_missing or product_missing or amount_missing or currency_missing or bool(extraction.warnings)`). Seen live: an invoice with every field correctly extracted still showed the "missing fields" banner because the model had put invoice boilerplate/disclaimer text it was unsure about into `warnings`. The message is misleading in that case - nothing was missing. Fix direction: distinguish the two cases in the UI (e.g. separate "field(s) missing" vs "review the warnings below" messaging), rather than one blanket flag/message covering both.
-- Milestones 5-6 (cloud option, release hardening) are untouched.
+- Milestone 5 (release hardening) is untouched.
 
 ## Development environment
 
@@ -53,10 +53,8 @@ Written for picking this project back up in a fresh session; update it as work c
 - Rename without overwriting existing files.
 - Undo the last batch.
 - Download, replace, and remove the local model.
-- Configure one OpenRouter key and explicitly choose cloud processing.
-- Browse all app-supported models in separate **Open / Local** and **Closed / Cloud** sections.
-- Keep closed models visible but disabled until an OpenRouter key is configured.
-- Show run metrics: inference and total time, model/provider, processing path, warnings, token usage when available, and optional cloud cost.
+- Browse all app-supported local models.
+- Show run metrics: inference and total time, model/provider, warnings, and token usage when available.
 
 Later: watched folders, Finder extensions, website deployment, automatic updates, and direct vision models.
 
@@ -73,19 +71,19 @@ Each building block owns one responsibility, exposes a narrow interface, and can
 | BB-05 | Extraction contract | Python/Pydantic | Normalized document → validated `InvoiceExtraction` | 2 |
 | BB-06 | Local model runtime | Transformers/PyTorch | Extraction request → model response and metrics | 1–3 |
 | BB-07 | Model catalog and manager | Python | Supported models, compatibility, download/remove/status | 3 |
-| BB-08 | Cloud adapter | Python/OpenRouter | Explicit cloud request → same extraction contract | 5 |
 | BB-09 | Filename builder | Python | `InvoiceExtraction` → `FilenameProposal` | 2 |
 | BB-10 | Batch workspace | React/TypeScript | Import, model selection, progress, edits, approval | 4 |
 | BB-11 | File transaction and Undo | Tauri/Rust | Atomic preflight, rename result, persistent Undo record | 4 |
-| BB-12 | Run report | Python + React | Timings, model/provider, OCR path, tokens, cost, warnings | 3–5 |
-| BB-13 | Settings and secrets | Tauri/Rust | Preferences plus OS-keychain-backed OpenRouter key (Keychain on macOS, Secret Service/libsecret on Linux) | 5 |
-| BB-14 | Packaging pipeline | Tauri + Python tooling | Signed app containing the packaged sidecar | 1 and 6 |
+| BB-12 | Run report | Python + React | Timings, model/provider, OCR path, tokens, warnings | 3 |
+| BB-14 | Packaging pipeline | Tauri + Python tooling | Signed app containing the packaged sidecar | 1 and 5 |
 
 Primary flow:
 
-`BB-10 → BB-01/02 → BB-03/04 → BB-05/06 or BB-08 → BB-09/12 → BB-10 → BB-11`
+`BB-10 → BB-01/02 → BB-03/04 → BB-05/06 → BB-09/12 → BB-10 → BB-11`
 
-`BB-07` supplies the local model to `BB-06`; `BB-13` supplies cloud credentials to `BB-08`.
+`BB-07` supplies the local model to `BB-06`.
+
+BB-08 (cloud adapter) and BB-13 (settings/OpenRouter key) are dropped: the app is local-only, no cloud/closed-model path.
 
 Tauri owns source-file access and mutations. Python receives PDF bytes for analysis and never renames files. This keeps filesystem permissions and Undo in the desktop layer and makes the analysis API reusable.
 
@@ -146,7 +144,6 @@ RunMetrics
   pdf_extraction_ms: integer
   ocr_ms: integer
   inference_ms: integer
-  execution_mode: local | cloud
   model_id: string
   provider: string
   model_revision: string | null
@@ -155,8 +152,6 @@ RunMetrics
   input_tokens: integer | null
   output_tokens: integer | null
   tokens_per_second: number | null
-  cost: decimal | null
-  cost_currency: string | null
   warnings: list[string]
 ```
 
@@ -170,7 +165,7 @@ All requests require a random session token created by Tauri when starting the w
 |---|---|---|
 | GET | `/health` | Worker and dependency status |
 | GET | `/capabilities` | Acceleration backend (MPS/CUDA/CPU), OCR, memory, disk, and model readiness |
-| GET | `/models` | Supported open/closed models, availability, installation, and recommendations |
+| GET | `/models` | Supported local models, availability, installation, and recommendations |
 | POST | `/models/{id}/download` | Start or resume a model download |
 | DELETE | `/models/{id}` | Remove an installed model |
 | POST | `/analyses` | Upload PDF bytes and create an analysis job |
@@ -179,7 +174,7 @@ All requests require a random session token created by Tauri when starting the w
 
 Return `202` for long-running work. Poll job status initially; add server-sent events only if polling becomes limiting.
 
-Job results include `FilenameProposal` and `RunMetrics`. Cost is nullable and labeled as provider-reported or estimated; never fabricate a value when unavailable.
+Job results include `FilenameProposal` and `RunMetrics`.
 
 ## Document processing
 
@@ -202,10 +197,9 @@ Define one interface:
 extract_invoice(document_text, schema, options) -> InvoiceExtraction
 ```
 
-Implement two adapters:
+Implement one adapter:
 
 - `TransformersExtractor`: local Hugging Face model using the best available backend (MPS on Apple Silicon, CUDA/ROCm on Linux, else CPU), auto-selected with a manual override in settings.
-- `OpenRouterExtractor`: explicit cloud request with strict structured output.
 
 Validate every response with Pydantic. Allow one controlled repair/retry for invalid local JSON. Missing fields remain `null`; prompts must prohibit guessing.
 
@@ -250,11 +244,9 @@ Store rename history locally in the app container. Do not store invoice text in 
 ## Model management
 
 - Maintain a signed or bundled model manifest: ID, repository, revision, files, hashes, size, license, memory tier, and prompt template.
-- The model picker has separate **Open / Local** and **Closed / Cloud** sections, plus search and capability filters.
+- The model picker lists every supported local model, plus search and capability filters.
 - Show every model supported by the app's extraction contract; exclude incompatible catalog entries rather than allowing broken selections.
-- Open models show installation state, size, license, memory recommendation, and local compatibility.
-- Closed models show provider, context/capabilities, and pricing metadata when available.
-- Without an OpenRouter key, closed models remain visible and greyed out with a key-setup action. Setting or removing the key updates availability immediately.
+- Models show installation state, size, license, memory recommendation, and local compatibility.
 - Store weights in the app’s data container, outside the signed application bundle.
 - Support resumable downloads, checksum verification, cancellation, removal, and cleanup of partial files.
 - Never download or execute model repository code.
@@ -263,8 +255,6 @@ Store rename history locally in the app container. Do not store invoice text in 
 ## Privacy and security
 
 - Local mode performs no network requests after model installation.
-- Cloud uploads occur only after explicit selection and clear UI labeling.
-- Store the OpenRouter key in the OS keychain (Keychain on macOS, Secret Service/libsecret on Linux).
 - Redact keys, invoice text, and personal data from logs.
 - Use loopback only, a per-launch token, restricted CORS, request-size limits, and worker shutdown.
 - Keep telemetry disabled for the MVP.
@@ -291,7 +281,7 @@ App Store feasibility requires an early sandbox test covering user-selected file
 - XML/text merge and conflict warnings.
 - Batch preflight, rename, rollback, and Undo.
 - API authentication, job lifecycle, cancellation, and file limits.
-- Provider contract tests with mocked local/cloud responses.
+- Provider contract tests with mocked local responses.
 
 ### Evaluation set
 
@@ -307,8 +297,7 @@ Track field accuracy, hallucinations, correction rate, product-label usefulness,
 2. **Core processing — BB-03, 04, 05, 09:** PDF text/OCR/XML pipeline, schemas, validation, and filename builder.
 3. **Local AI — BB-06, 07, 12:** model and OCR-engine benchmark, selected model, app-managed download, offline inference, and run metrics.
 4. **Desktop workflow — BB-10, 11:** import, batch progress, editable previews, rename, collision handling, and Undo.
-5. **Cloud option — BB-08, 12, 13:** OS keychain, OpenRouter adapter, explicit cloud selection, cost display, and privacy UI.
-6. **Release hardening — BB-14 and full system:** packaging, failure recovery, performance, accessibility, macOS signing, optional App Store submission, and Linux packaging if pursued as a shipping target.
+5. **Release hardening — BB-14 and full system:** packaging, failure recovery, performance, accessibility, macOS signing, optional App Store submission, and Linux packaging if pursued as a shipping target.
 
 Each milestone must produce a runnable end-to-end slice. Do not build the full UI before the feasibility spike passes.
 
@@ -320,6 +309,4 @@ Each milestone must produce a runnable end-to-end slice. Do not build the full U
 - Produces valid, editable filename proposals and flags unknown values.
 - Batch rename never overwrites files and can be undone safely.
 - Model download is visible, resumable, verified, removable, and offline afterward.
-- Cloud processing requires an explicit action and uses the OS-keychain-stored OpenRouter key.
-- Open and closed models are clearly separated; closed models are disabled without a key.
-- Every completed run shows inference time and useful execution metadata; cloud cost is shown when available.
+- Every completed run shows inference time and useful execution metadata.
