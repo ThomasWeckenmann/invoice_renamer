@@ -5,9 +5,9 @@ import { describe, expect, it } from "vitest";
 import { App } from "./App";
 
 describe("App", () => {
-  it("renders the app heading", async () => {
+  it("renders the batch workspace", async () => {
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "Invoice Renamer" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Import" })).toBeInTheDocument();
   });
 });

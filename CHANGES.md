@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 0.15.0 (2026-09-17, claude sonnet-5)
+
+- Generate macOS/Linux Tauri icons from the new app logo
+
+  The source PNG at app/src/assets/logo.png generated the icon.icns and
+  PNG icon set in src-tauri/icons, wired into tauri.conf.json's
+  bundle.icon (bundle.active stays false). Showing the logo in-app was
+  tried and reverted per user feedback: it looked out of place.
+
 ## Version 0.14.0 (2026-09-17, claude sonnet-5)
 
 - Remove closed/cloud model support and drop the catalog's kind field
