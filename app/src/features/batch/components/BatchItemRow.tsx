@@ -1,8 +1,9 @@
 /** One imported invoice: status, extracted fields, editable filename, and
  * approve/cancel/remove actions. */
 
-import type { ChangeEvent } from "react";
+import { useState, type ChangeEvent } from "react";
 import { formatAmount, formatDuration } from "../../../lib/format";
+import { openWithSystemDefault } from "../../../lib/tauri/open";
 import type { RenameOutcome } from "../useRenameTransaction";
 import { displayFilename, type BatchItem } from "../types";
 
@@ -38,9 +39,18 @@ export function BatchItemRow({
   const { extraction } = item.proposal ?? { extraction: null };
   const canReview = item.status === "needs_review" || item.status === "approved";
   const isRenamed = renameOutcome?.status === "renamed";
+  const [openError, setOpenError] = useState<string | null>(null);
 
   const handleFilenameChange = (event: ChangeEvent<HTMLInputElement>) => {
     onEditFilename(item.id, event.target.value);
+  };
+
+  const handleOpen = () => {
+    setOpenError(null);
+    const path = isRenamed ? renameOutcome.destinationPath : item.sourcePath;
+    openWithSystemDefault(path).catch((err: unknown) => {
+      setOpenError(err instanceof Error ? err.message : String(err));
+    });
   };
 
   return (
@@ -166,7 +176,16 @@ export function BatchItemRow({
         </p>
       )}
 
+      {openError && (
+        <p role="alert" className="batch-item__error">
+          Couldn't open the file: {openError}
+        </p>
+      )}
+
       <div className="batch-item__actions">
+        <button type="button" onClick={handleOpen}>
+          Open
+        </button>
         {(item.status === "queued" || item.status === "running") && (
           <button type="button" onClick={() => onCancel(item.id)}>
             Cancel

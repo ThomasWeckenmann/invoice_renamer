@@ -1542,6 +1542,7 @@ version = "0.1.0"
 dependencies = [
  "libc",
  "log",
+ "open",
  "rand",
  "serde",
  "serde_json",

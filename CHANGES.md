@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 0.19.0 (2026-09-18, claude sonnet-5)
+
+- Add an Open button to open a batch item's PDF in the system default app
+
+  Opens the current file (the renamed destination once renamed, else the
+  original source) via a new open_with_system_default Tauri command, e.g.
+  Preview on macOS. Waits for the launcher's exit status on a background
+  thread, so a missing default app is reported as an error, not a freeze.
+
 ## Version 0.18.2 (2026-09-18, claude sonnet-5)
 
 - Rename the displayed 'Needs review' status to 'Awaiting approval'

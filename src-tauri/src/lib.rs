@@ -18,6 +18,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::get_worker_endpoint,
             commands::read_file_bytes,
+            commands::open_with_system_default,
             commands::rename::rename_batch,
             commands::rename::undo_last_rename_batch,
             commands::rename::get_last_batch_summary,

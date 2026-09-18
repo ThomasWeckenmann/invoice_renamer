@@ -1,9 +1,14 @@
-/** Tests for the batch item row's run-metrics disclosure. */
+/** Tests for the batch item row's run-metrics disclosure and the
+ * open-with-system-default action. */
 
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { invoke } from "@tauri-apps/api/core";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { RenameOutcome } from "../useRenameTransaction";
 import type { BatchItem } from "../types";
 import { BatchItemRow } from "./BatchItemRow";
+
+const mockedInvoke = vi.mocked(invoke);
 
 function reviewItem(overrides: Partial<BatchItem> = {}): BatchItem {
   return {
@@ -165,5 +170,99 @@ describe("BatchItemRow", () => {
 
     expect(screen.getByText("qwen3-0.6b")).toBeInTheDocument();
     expect(screen.queryByText("Tokens")).not.toBeInTheDocument();
+  });
+});
+
+describe("BatchItemRow open action", () => {
+  afterEach(() => {
+    mockedInvoke.mockReset();
+  });
+
+  it("offers Open regardless of review status", () => {
+    render(
+      <ul>
+        <BatchItemRow
+          item={reviewItem({ status: "queued", proposal: null })}
+          onEditFilename={noop}
+          onApprove={noop}
+          onUnapprove={noop}
+          onCancel={noop}
+          onRemove={noop}
+        />
+      </ul>,
+    );
+
+    expect(screen.getByRole("button", { name: "Open" })).toBeInTheDocument();
+  });
+
+  it("opens the source path with the system default application before a rename", () => {
+    mockedInvoke.mockResolvedValue(undefined);
+    render(
+      <ul>
+        <BatchItemRow
+          item={reviewItem({ sourcePath: "/invoices/invoice.pdf" })}
+          onEditFilename={noop}
+          onApprove={noop}
+          onUnapprove={noop}
+          onCancel={noop}
+          onRemove={noop}
+        />
+      </ul>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+
+    expect(mockedInvoke).toHaveBeenCalledWith("open_with_system_default", {
+      path: "/invoices/invoice.pdf",
+    });
+  });
+
+  it("opens the destination path once the item has been renamed", () => {
+    mockedInvoke.mockResolvedValue(undefined);
+    const renameOutcome: RenameOutcome = {
+      status: "renamed",
+      destinationPath: "/invoices/2026-01-05_Acme_Widget_42-EUR.pdf",
+    };
+    render(
+      <ul>
+        <BatchItemRow
+          item={reviewItem({ sourcePath: "/invoices/invoice.pdf" })}
+          renameOutcome={renameOutcome}
+          onEditFilename={noop}
+          onApprove={noop}
+          onUnapprove={noop}
+          onCancel={noop}
+          onRemove={noop}
+        />
+      </ul>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+
+    expect(mockedInvoke).toHaveBeenCalledWith("open_with_system_default", {
+      path: "/invoices/2026-01-05_Acme_Widget_42-EUR.pdf",
+    });
+  });
+
+  it("shows an error when the file can't be opened", async () => {
+    mockedInvoke.mockRejectedValue(new Error("no application found"));
+    render(
+      <ul>
+        <BatchItemRow
+          item={reviewItem()}
+          onEditFilename={noop}
+          onApprove={noop}
+          onUnapprove={noop}
+          onCancel={noop}
+          onRemove={noop}
+        />
+      </ul>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Couldn't open the file: no application found",
+    );
   });
 });
