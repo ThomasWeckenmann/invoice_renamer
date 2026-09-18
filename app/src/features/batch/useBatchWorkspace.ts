@@ -42,6 +42,7 @@ export interface UseBatchWorkspaceResult {
   unapproveItem: (id: string) => void;
   approveAll: () => void;
   cancelItem: (id: string) => void;
+  rerunItem: (id: string, modelId: string) => void;
   startAnalysis: (modelId: string) => void;
   isAnalyzing: boolean;
   pendingCount: number;
@@ -53,11 +54,24 @@ export function useBatchWorkspace(): UseBatchWorkspaceResult {
   const itemsRef = useRef(items);
   itemsRef.current = items;
   const pollTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
-  // Ids the user has cancelled or removed. Submission and poll responses for
-  // these ids are already in flight when that happens, so this is checked
-  // when they land, to stop a late response from reviving state the user
-  // already dismissed (and to cancel a backend job that wasn't known yet).
-  const stoppedIds = useRef(new Set<string>());
+  // Per-id generation counter. Cancel, remove, and each fresh submit/rerun
+  // bump an id's generation; a submit/poll chain captures the generation it
+  // was started under and checks it before applying a response, so a late
+  // response from a chain that's been superseded (by a cancel, or by a
+  // rerun starting a newer chain for the same id) can never win a race
+  // against a later one and clobber its state.
+  const generations = useRef(new Map<string, number>());
+
+  const bumpGeneration = useCallback((id: string) => {
+    const next = (generations.current.get(id) ?? 0) + 1;
+    generations.current.set(id, next);
+    return next;
+  }, []);
+
+  const isCurrentGeneration = useCallback(
+    (id: string, generation: number) => generations.current.get(id) === generation,
+    [],
+  );
 
   useEffect(() => {
     const timers = pollTimers.current;
@@ -82,7 +96,7 @@ export function useBatchWorkspace(): UseBatchWorkspaceResult {
   }, []);
 
   const pollJob = useCallback(
-    (id: string, jobId: string) => {
+    (id: string, jobId: string, generation: number) => {
       const timer = setTimeout(() => {
         void (async () => {
           let job: AnalysisJobView;
@@ -90,13 +104,13 @@ export function useBatchWorkspace(): UseBatchWorkspaceResult {
             job = await fetchJob(jobId);
           } catch (err) {
             pollTimers.current.delete(id);
-            if (!stoppedIds.current.has(id)) {
+            if (isCurrentGeneration(id, generation)) {
               updateItem(id, { status: "failed", error: errorMessage(err) });
             }
             return;
           }
           pollTimers.current.delete(id);
-          if (stoppedIds.current.has(id)) {
+          if (!isCurrentGeneration(id, generation)) {
             return;
           }
           const status = statusFromJob(job.status);
@@ -108,13 +122,13 @@ export function useBatchWorkspace(): UseBatchWorkspaceResult {
             error: job.error,
           });
           if (status === "queued" || status === "running") {
-            pollJob(id, jobId);
+            pollJob(id, jobId, generation);
           }
         })();
       }, POLL_INTERVAL_MS);
       pollTimers.current.set(id, timer);
     },
-    [updateItem],
+    [isCurrentGeneration, updateItem],
   );
 
   const addFiles = useCallback((files: ImportedFile[]) => {
@@ -139,7 +153,7 @@ export function useBatchWorkspace(): UseBatchWorkspaceResult {
 
   const removeItem = useCallback(
     (id: string) => {
-      stoppedIds.current.add(id);
+      bumpGeneration(id);
       const item = itemsRef.current.find((candidate) => candidate.id === id);
       if (item?.jobId && (item.status === "queued" || item.status === "running")) {
         void cancelJob(item.jobId).catch(() => {});
@@ -147,7 +161,7 @@ export function useBatchWorkspace(): UseBatchWorkspaceResult {
       clearPoll(id);
       setItems((prev) => prev.filter((candidate) => candidate.id !== id));
     },
-    [clearPoll],
+    [bumpGeneration, clearPoll],
   );
 
   const editFilename = useCallback(
@@ -169,7 +183,7 @@ export function useBatchWorkspace(): UseBatchWorkspaceResult {
 
   const cancelItem = useCallback(
     (id: string) => {
-      stoppedIds.current.add(id);
+      bumpGeneration(id);
       const item = itemsRef.current.find((candidate) => candidate.id === id);
       if (item?.jobId) {
         void cancelJob(item.jobId).catch(() => {});
@@ -177,7 +191,36 @@ export function useBatchWorkspace(): UseBatchWorkspaceResult {
       clearPoll(id);
       updateItem(id, { status: "cancelled" });
     },
-    [clearPoll, updateItem],
+    [bumpGeneration, clearPoll, updateItem],
+  );
+
+  const submitItem = useCallback(
+    (item: BatchItem, modelId: string) => {
+      const generation = bumpGeneration(item.id);
+      void submitAnalysis(item.file, modelId)
+        .then((job) => {
+          if (!isCurrentGeneration(item.id, generation)) {
+            // Cancelled/removed/rerun while the upload was in flight: this
+            // is the first point a real job id exists, so it's the first
+            // point cancellation can actually reach the backend.
+            void cancelJob(job.id).catch(() => {});
+            return;
+          }
+          updateItem(item.id, {
+            status: statusFromJob(job.status),
+            jobId: job.id,
+            memoryWarning: job.memory_warning,
+          });
+          pollJob(item.id, job.id, generation);
+        })
+        .catch((err) => {
+          if (!isCurrentGeneration(item.id, generation)) {
+            return;
+          }
+          updateItem(item.id, { status: "failed", error: errorMessage(err) });
+        });
+    },
+    [bumpGeneration, isCurrentGeneration, pollJob, updateItem],
   );
 
   const startAnalysis = useCallback(
@@ -190,31 +233,34 @@ export function useBatchWorkspace(): UseBatchWorkspaceResult {
         prev.map((item) => (item.status === "pending" ? { ...item, status: "queued" } : item)),
       );
       for (const item of toSubmit) {
-        void submitAnalysis(item.file, modelId)
-          .then((job) => {
-            if (stoppedIds.current.has(item.id)) {
-              // Cancelled/removed while the upload was in flight: this is
-              // the first point a real job id exists, so it's the first
-              // point cancellation can actually reach the backend.
-              void cancelJob(job.id).catch(() => {});
-              return;
-            }
-            updateItem(item.id, {
-              status: statusFromJob(job.status),
-              jobId: job.id,
-              memoryWarning: job.memory_warning,
-            });
-            pollJob(item.id, job.id);
-          })
-          .catch((err) => {
-            if (stoppedIds.current.has(item.id)) {
-              return;
-            }
-            updateItem(item.id, { status: "failed", error: errorMessage(err) });
-          });
+        submitItem(item, modelId);
       }
     },
-    [pollJob, updateItem],
+    [submitItem],
+  );
+
+  const rerunItem = useCallback(
+    (id: string, modelId: string) => {
+      const item = itemsRef.current.find((candidate) => candidate.id === id);
+      if (!item) {
+        return;
+      }
+      // Clear any leftover poll before resubmitting as a fresh job;
+      // submitItem below starts a new generation, which on its own
+      // invalidates any response still in flight from the prior run.
+      clearPoll(id);
+      updateItem(id, {
+        status: "queued",
+        jobId: null,
+        proposal: null,
+        editedFilename: null,
+        metrics: null,
+        memoryWarning: null,
+        error: null,
+      });
+      submitItem(item, modelId);
+    },
+    [clearPoll, submitItem, updateItem],
   );
 
   const isAnalyzing = useMemo(
@@ -236,6 +282,7 @@ export function useBatchWorkspace(): UseBatchWorkspaceResult {
     unapproveItem,
     approveAll,
     cancelItem,
+    rerunItem,
     startAnalysis,
     isAnalyzing,
     pendingCount,

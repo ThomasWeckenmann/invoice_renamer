@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 0.20.0 (2026-09-18, claude sonnet-5)
+
+- Add a Re-Run button for cancelled, failed, and reviewed batch items
+
+  Cancelling an item previously left it permanently stuck, with no way to
+  resubmit short of removing and re-importing the PDF. Re-Run resets the
+  row and resubmits with the selected model, using a per-item generation
+  counter so a stale response from a superseded run can't clobber it.
+
 ## Version 0.19.0 (2026-09-18, claude sonnet-5)
 
 - Add an Open button to open a batch item's PDF in the system default app

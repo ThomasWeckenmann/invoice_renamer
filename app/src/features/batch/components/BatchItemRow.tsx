@@ -14,6 +14,8 @@ interface BatchItemRowProps {
   onApprove: (id: string) => void;
   onUnapprove: (id: string) => void;
   onCancel: (id: string) => void;
+  onRerun: (id: string) => void;
+  canRerun: boolean;
   onRemove: (id: string) => void;
 }
 
@@ -34,11 +36,19 @@ export function BatchItemRow({
   onApprove,
   onUnapprove,
   onCancel,
+  onRerun,
+  canRerun,
   onRemove,
 }: BatchItemRowProps) {
   const { extraction } = item.proposal ?? { extraction: null };
   const canReview = item.status === "needs_review" || item.status === "approved";
   const isRenamed = renameOutcome?.status === "renamed";
+  const canShowRerun =
+    !isRenamed &&
+    (item.status === "cancelled" ||
+      item.status === "failed" ||
+      item.status === "needs_review" ||
+      item.status === "approved");
   const [openError, setOpenError] = useState<string | null>(null);
 
   const handleFilenameChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -189,6 +199,11 @@ export function BatchItemRow({
         {(item.status === "queued" || item.status === "running") && (
           <button type="button" onClick={() => onCancel(item.id)}>
             Cancel
+          </button>
+        )}
+        {canShowRerun && (
+          <button type="button" disabled={!canRerun} onClick={() => onRerun(item.id)}>
+            Re-Run
           </button>
         )}
         <button type="button" onClick={() => onRemove(item.id)}>

@@ -58,6 +58,8 @@ describe("BatchItemRow", () => {
           onApprove={noop}
           onUnapprove={noop}
           onCancel={noop}
+          onRerun={noop}
+          canRerun={true}
           onRemove={noop}
         />
       </ul>,
@@ -75,6 +77,8 @@ describe("BatchItemRow", () => {
           onApprove={noop}
           onUnapprove={noop}
           onCancel={noop}
+          onRerun={noop}
+          canRerun={true}
           onRemove={noop}
         />
       </ul>,
@@ -92,6 +96,8 @@ describe("BatchItemRow", () => {
           onApprove={noop}
           onUnapprove={noop}
           onCancel={noop}
+          onRerun={noop}
+          canRerun={true}
           onRemove={noop}
         />
       </ul>,
@@ -125,6 +131,8 @@ describe("BatchItemRow", () => {
           onApprove={noop}
           onUnapprove={noop}
           onCancel={noop}
+          onRerun={noop}
+          canRerun={true}
           onRemove={noop}
         />
       </ul>,
@@ -163,6 +171,8 @@ describe("BatchItemRow", () => {
           onApprove={noop}
           onUnapprove={noop}
           onCancel={noop}
+          onRerun={noop}
+          canRerun={true}
           onRemove={noop}
         />
       </ul>,
@@ -170,6 +180,93 @@ describe("BatchItemRow", () => {
 
     expect(screen.getByText("qwen3-0.6b")).toBeInTheDocument();
     expect(screen.queryByText("Tokens")).not.toBeInTheDocument();
+  });
+});
+
+describe("BatchItemRow rerun action", () => {
+  it("offers Re-Run for a cancelled item and calls back with its id", () => {
+    const onRerun = vi.fn();
+    render(
+      <ul>
+        <BatchItemRow
+          item={reviewItem({ status: "cancelled", proposal: null })}
+          onEditFilename={noop}
+          onApprove={noop}
+          onUnapprove={noop}
+          onCancel={noop}
+          onRerun={onRerun}
+          canRerun={true}
+          onRemove={noop}
+        />
+      </ul>,
+    );
+
+    const button = screen.getByRole("button", { name: "Re-Run" });
+    fireEvent.click(button);
+
+    expect(onRerun).toHaveBeenCalledWith("item-1");
+  });
+
+  it("offers Re-Run for a failed item, disabled when no model is selected", () => {
+    render(
+      <ul>
+        <BatchItemRow
+          item={reviewItem({ status: "failed", proposal: null, error: "boom" })}
+          onEditFilename={noop}
+          onApprove={noop}
+          onUnapprove={noop}
+          onCancel={noop}
+          onRerun={noop}
+          canRerun={false}
+          onRemove={noop}
+        />
+      </ul>,
+    );
+
+    expect(screen.getByRole("button", { name: "Re-Run" })).toBeDisabled();
+  });
+
+  it("does not offer Re-Run once the item has already been renamed", () => {
+    const renameOutcome: RenameOutcome = {
+      status: "renamed",
+      destinationPath: "/invoices/2026-01-05_Acme_Widget_42-EUR.pdf",
+    };
+    render(
+      <ul>
+        <BatchItemRow
+          item={reviewItem({ status: "approved" })}
+          renameOutcome={renameOutcome}
+          onEditFilename={noop}
+          onApprove={noop}
+          onUnapprove={noop}
+          onCancel={noop}
+          onRerun={noop}
+          canRerun={true}
+          onRemove={noop}
+        />
+      </ul>,
+    );
+
+    expect(screen.queryByRole("button", { name: "Re-Run" })).not.toBeInTheDocument();
+  });
+
+  it("does not offer Re-Run for a pending item", () => {
+    render(
+      <ul>
+        <BatchItemRow
+          item={reviewItem({ status: "pending", proposal: null })}
+          onEditFilename={noop}
+          onApprove={noop}
+          onUnapprove={noop}
+          onCancel={noop}
+          onRerun={noop}
+          canRerun={true}
+          onRemove={noop}
+        />
+      </ul>,
+    );
+
+    expect(screen.queryByRole("button", { name: "Re-Run" })).not.toBeInTheDocument();
   });
 });
 
@@ -187,6 +284,8 @@ describe("BatchItemRow open action", () => {
           onApprove={noop}
           onUnapprove={noop}
           onCancel={noop}
+          onRerun={noop}
+          canRerun={true}
           onRemove={noop}
         />
       </ul>,
@@ -205,6 +304,8 @@ describe("BatchItemRow open action", () => {
           onApprove={noop}
           onUnapprove={noop}
           onCancel={noop}
+          onRerun={noop}
+          canRerun={true}
           onRemove={noop}
         />
       </ul>,
@@ -232,6 +333,8 @@ describe("BatchItemRow open action", () => {
           onApprove={noop}
           onUnapprove={noop}
           onCancel={noop}
+          onRerun={noop}
+          canRerun={true}
           onRemove={noop}
         />
       </ul>,
@@ -254,6 +357,8 @@ describe("BatchItemRow open action", () => {
           onApprove={noop}
           onUnapprove={noop}
           onCancel={noop}
+          onRerun={noop}
+          canRerun={true}
           onRemove={noop}
         />
       </ul>,

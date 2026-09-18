@@ -11,6 +11,8 @@ interface BatchListProps {
   onApprove: (id: string) => void;
   onUnapprove: (id: string) => void;
   onCancel: (id: string) => void;
+  onRerun: (id: string) => void;
+  canRerun: boolean;
   onRemove: (id: string) => void;
 }
 
@@ -21,6 +23,8 @@ export function BatchList({
   onApprove,
   onUnapprove,
   onCancel,
+  onRerun,
+  canRerun,
   onRemove,
 }: BatchListProps) {
   if (items.length === 0) {
@@ -38,6 +42,8 @@ export function BatchList({
           onApprove={onApprove}
           onUnapprove={onUnapprove}
           onCancel={onCancel}
+          onRerun={onRerun}
+          canRerun={canRerun}
           onRemove={onRemove}
         />
       ))}

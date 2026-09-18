@@ -132,6 +132,112 @@ describe("useBatchWorkspace", () => {
     expect(analysesApi.cancelJob).toHaveBeenCalledWith("job-1");
   });
 
+  it("rerunItem resubmits a cancelled item and clears its prior state", async () => {
+    vi.mocked(analysesApi.submitAnalysis).mockResolvedValue(queuedJob());
+    vi.mocked(analysesApi.cancelJob).mockResolvedValue(queuedJob({ status: "cancelled" }));
+
+    const { result } = renderHook(() => useBatchWorkspace());
+    act(() => result.current.addFiles([importedPdf()]));
+    act(() => result.current.startAnalysis("granite-3.3-2b"));
+    const id = result.current.items[0].id;
+
+    await waitFor(() => expect(result.current.items[0].jobId).toBe("job-1"));
+    act(() => result.current.cancelItem(id));
+    expect(result.current.items[0].status).toBe("cancelled");
+
+    vi.mocked(analysesApi.submitAnalysis).mockResolvedValue(queuedJob({ id: "job-2" }));
+    vi.mocked(analysesApi.fetchJob).mockResolvedValue(queuedJob({ id: "job-2", status: "completed" }));
+
+    act(() => result.current.rerunItem(id, "qwen3-0.6b"));
+
+    expect(result.current.items[0].status).toBe("queued");
+    expect(result.current.items[0].error).toBeNull();
+    expect(analysesApi.submitAnalysis).toHaveBeenLastCalledWith(expect.any(File), "qwen3-0.6b");
+
+    await waitFor(() => expect(result.current.items[0].jobId).toBe("job-2"));
+    await waitFor(() => expect(result.current.items[0].status).toBe("needs_review"), {
+      timeout: 3000,
+    });
+  });
+
+  it("a poll response from the cancelled run does not overwrite a rerun", async () => {
+    vi.mocked(analysesApi.submitAnalysis).mockResolvedValueOnce(queuedJob({ id: "job-1" }));
+    let resolveFetchJob!: (job: AnalysisJobView) => void;
+    vi.mocked(analysesApi.fetchJob).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveFetchJob = resolve;
+        }),
+    );
+    vi.mocked(analysesApi.cancelJob).mockResolvedValue(queuedJob({ status: "cancelled" }));
+
+    const { result } = renderHook(() => useBatchWorkspace());
+    act(() => result.current.addFiles([importedPdf()]));
+    act(() => result.current.startAnalysis("granite-3.3-2b"));
+    const id = result.current.items[0].id;
+
+    await waitFor(() => expect(result.current.items[0].jobId).toBe("job-1"));
+    // Wait for the poll interval to fire so a fetchJob call for job-1 is in
+    // flight (blocked on the unresolved promise above) when we cancel.
+    await waitFor(() => expect(analysesApi.fetchJob).toHaveBeenCalled(), { timeout: 2000 });
+
+    act(() => result.current.cancelItem(id));
+    expect(result.current.items[0].status).toBe("cancelled");
+
+    // Rerun before the stale job-1 poll resolves.
+    vi.mocked(analysesApi.submitAnalysis).mockResolvedValueOnce(queuedJob({ id: "job-2" }));
+    act(() => result.current.rerunItem(id, "qwen3-0.6b"));
+    await waitFor(() => expect(result.current.items[0].jobId).toBe("job-2"));
+
+    // The stale job-1 poll now resolves as "running" - it must not clobber
+    // the fresh job-2 state (this is the race a cancelled run's leftover
+    // poll used to win against a rerun).
+    await act(async () => {
+      resolveFetchJob(queuedJob({ id: "job-1", status: "running" }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(result.current.items[0].jobId).toBe("job-2");
+    expect(result.current.items[0].status).toBe("queued");
+    expect(analysesApi.fetchJob).toHaveBeenCalledTimes(1);
+  });
+
+  it("a submit response from the cancelled run does not overwrite a rerun", async () => {
+    let resolveFirstSubmit!: (job: AnalysisJobView) => void;
+    vi.mocked(analysesApi.submitAnalysis).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveFirstSubmit = resolve;
+      }),
+    );
+    vi.mocked(analysesApi.cancelJob).mockResolvedValue(queuedJob({ status: "cancelled" }));
+
+    const { result } = renderHook(() => useBatchWorkspace());
+    act(() => result.current.addFiles([importedPdf()]));
+    act(() => result.current.startAnalysis("granite-3.3-2b"));
+    const id = result.current.items[0].id;
+
+    // Cancel while the first submit is still in flight - no job id yet.
+    act(() => result.current.cancelItem(id));
+    expect(result.current.items[0].status).toBe("cancelled");
+
+    // Rerun before the stale submit resolves.
+    vi.mocked(analysesApi.submitAnalysis).mockResolvedValueOnce(queuedJob({ id: "job-2" }));
+    act(() => result.current.rerunItem(id, "qwen3-0.6b"));
+    await waitFor(() => expect(result.current.items[0].jobId).toBe("job-2"));
+
+    // The stale first submit now resolves - it must be cancelled on the
+    // backend, not allowed to overwrite job-2's fresh state.
+    await act(async () => {
+      resolveFirstSubmit(queuedJob({ id: "job-1" }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(result.current.items[0].jobId).toBe("job-2");
+    expect(analysesApi.cancelJob).toHaveBeenCalledWith("job-1");
+  });
+
   it("removeItem drops the item from the list", () => {
     const { result } = renderHook(() => useBatchWorkspace());
     act(() => result.current.addFiles([importedPdf()]));

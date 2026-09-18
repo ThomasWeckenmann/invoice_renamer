@@ -19,6 +19,7 @@ export function BatchWorkspace() {
 
   const selectedModel = catalog.models.find((model) => model.entry.id === selectedModelId);
   const canAnalyze = batch.pendingCount > 0 && selectedModel?.status === "installed";
+  const canRerun = selectedModel?.status === "installed";
   const reviewCount = batch.items.filter((item) => item.status === "needs_review").length;
   const renameableCount = batch.items.filter(
     (item) => item.status === "approved" && rename.outcomes[item.id]?.status !== "renamed",
@@ -27,6 +28,12 @@ export function BatchWorkspace() {
   const handleAnalyze = () => {
     if (selectedModelId) {
       batch.startAnalysis(selectedModelId);
+    }
+  };
+
+  const handleRerun = (id: string) => {
+    if (selectedModelId && canRerun) {
+      batch.rerunItem(id, selectedModelId);
     }
   };
 
@@ -80,6 +87,8 @@ export function BatchWorkspace() {
           onApprove={batch.approveItem}
           onUnapprove={batch.unapproveItem}
           onCancel={batch.cancelItem}
+          onRerun={handleRerun}
+          canRerun={canRerun}
           onRemove={batch.removeItem}
         />
 
