@@ -9,13 +9,6 @@
   missing_fields list on FilenameProposal lets the UI show the accurate
   reason: which fields are actually missing, versus warnings to review.
 
-- stop asking the model for warnings; keep only code-generated ones
-
-  Tightening the prompt didn't stop invoice boilerplate leaking in, so
-  the model is no longer asked for warnings at all - missing_fields
-  already covers missing values, and a stray warnings key from the
-  model is now dropped before validation so it can't sneak back in.
-
 ## Version 0.16.0 (2026-09-17, claude sonnet-5)
 
 - Enable release app bundling and document self-build steps in README.md
