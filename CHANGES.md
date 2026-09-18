@@ -1,5 +1,13 @@
 # Changelog
 
+## Version 0.17.0 (2026-09-18, claude sonnet-5)
+
+- Show run metrics (timings, model, pages, tokens) on each reviewed invoice
+
+  BatchItemRow gets a collapsible 'Run details' section reading the
+  RunMetrics the backend already computed but the UI never displayed:
+  total/inference time, OCR page count, and token usage when available.
+
 ## Version 0.16.1 (2026-09-17, claude sonnet-5)
 
 - bugfix: stop the review banner from claiming fields are missing when they aren't

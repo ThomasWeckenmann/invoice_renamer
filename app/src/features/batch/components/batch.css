@@ -100,6 +100,24 @@
   font-size: 0.85rem;
 }
 
+.batch-item__metrics {
+  margin: 0.5rem 0;
+  font-size: 0.85rem;
+  color: #444;
+}
+
+.batch-item__metrics summary {
+  cursor: pointer;
+  color: #333;
+}
+
+.batch-item__metrics dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 0.75rem;
+  margin: 0.5rem 0 0;
+}
+
 .batch-item__actions {
   display: flex;
   gap: 0.5rem;

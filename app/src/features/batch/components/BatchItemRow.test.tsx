@@ -1,0 +1,128 @@
+/** Tests for the batch item row's run-metrics disclosure. */
+
+import { render, screen } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
+import type { BatchItem } from "../types";
+import { BatchItemRow } from "./BatchItemRow";
+
+function reviewItem(overrides: Partial<BatchItem> = {}): BatchItem {
+  return {
+    id: "item-1",
+    file: new File(["%PDF-1.4"], "invoice.pdf", { type: "application/pdf" }),
+    sourcePath: "/invoices/invoice.pdf",
+    status: "needs_review",
+    jobId: "job-1",
+    proposal: {
+      extraction: {
+        invoice_date: "2026-01-05",
+        seller: "Acme",
+        product_summary: "Widget",
+        gross_total: "42.00",
+        currency: "EUR",
+        language: "en",
+        evidence: {},
+        warnings: [],
+      },
+      proposed_filename: "2026-01-05_Acme_Widget_42-EUR.pdf",
+      requires_review: false,
+      missing_fields: [],
+    },
+    editedFilename: null,
+    metrics: null,
+    error: null,
+    ...overrides,
+  };
+}
+
+const noop = () => {};
+
+describe("BatchItemRow", () => {
+  it("renders no run-details disclosure when metrics are absent", () => {
+    render(
+      <ul>
+        <BatchItemRow
+          item={reviewItem()}
+          onEditFilename={noop}
+          onApprove={noop}
+          onUnapprove={noop}
+          onCancel={noop}
+          onRemove={noop}
+        />
+      </ul>,
+    );
+
+    expect(screen.queryByText("Run details")).not.toBeInTheDocument();
+  });
+
+  it("shows timings, pages, and token usage from RunMetrics", () => {
+    render(
+      <ul>
+        <BatchItemRow
+          item={reviewItem({
+            metrics: {
+              total_ms: 4200,
+              pdf_extraction_ms: 100,
+              ocr_ms: 600,
+              inference_ms: 3500,
+              model_id: "granite-3.3-2b",
+              provider: "transformers",
+              model_revision: "abc123",
+              pages_total: 3,
+              pages_ocr: [2],
+              input_tokens: 512,
+              output_tokens: 64,
+              tokens_per_second: 12.5,
+              warnings: [],
+            },
+          })}
+          onEditFilename={noop}
+          onApprove={noop}
+          onUnapprove={noop}
+          onCancel={noop}
+          onRemove={noop}
+        />
+      </ul>,
+    );
+
+    expect(screen.getByText("Run details")).toBeInTheDocument();
+    expect(screen.getByText("granite-3.3-2b @ abc123")).toBeInTheDocument();
+    expect(screen.getByText("4.2 s")).toBeInTheDocument();
+    expect(screen.getByText("3.5 s")).toBeInTheDocument();
+    expect(screen.getByText("3 (1 via OCR)")).toBeInTheDocument();
+    expect(screen.getByText("512 in / 64 out (12.5 tok/s)")).toBeInTheDocument();
+  });
+
+  it("omits the tokens row when no token counts are available", () => {
+    render(
+      <ul>
+        <BatchItemRow
+          item={reviewItem({
+            metrics: {
+              total_ms: 800,
+              pdf_extraction_ms: 100,
+              ocr_ms: 0,
+              inference_ms: 700,
+              model_id: "qwen3-0.6b",
+              provider: "transformers",
+              model_revision: null,
+              pages_total: 1,
+              pages_ocr: [],
+              input_tokens: null,
+              output_tokens: null,
+              tokens_per_second: null,
+              warnings: [],
+            },
+          })}
+          onEditFilename={noop}
+          onApprove={noop}
+          onUnapprove={noop}
+          onCancel={noop}
+          onRemove={noop}
+        />
+      </ul>,
+    );
+
+    expect(screen.getByText("qwen3-0.6b")).toBeInTheDocument();
+    expect(screen.queryByText("Tokens")).not.toBeInTheDocument();
+  });
+});

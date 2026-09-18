@@ -2,7 +2,7 @@
  * approve/cancel/remove actions. */
 
 import type { ChangeEvent } from "react";
-import { formatAmount } from "../../../lib/format";
+import { formatAmount, formatDuration } from "../../../lib/format";
 import type { RenameOutcome } from "../useRenameTransaction";
 import { displayFilename, type BatchItem } from "../types";
 
@@ -105,6 +105,41 @@ export function BatchItemRow({
                 ))}
               </ul>
             </>
+          )}
+
+          {item.metrics && (
+            <details className="batch-item__metrics">
+              <summary>Run details</summary>
+              <dl>
+                <dt>Model</dt>
+                <dd>
+                  {item.metrics.model_id}
+                  {item.metrics.model_revision ? ` @ ${item.metrics.model_revision}` : ""}
+                </dd>
+                <dt>Total time</dt>
+                <dd>{formatDuration(item.metrics.total_ms)}</dd>
+                <dt>Inference time</dt>
+                <dd>{formatDuration(item.metrics.inference_ms)}</dd>
+                <dt>Pages</dt>
+                <dd>
+                  {item.metrics.pages_total}
+                  {item.metrics.pages_ocr.length > 0
+                    ? ` (${item.metrics.pages_ocr.length} via OCR)`
+                    : ""}
+                </dd>
+                {(item.metrics.input_tokens !== null || item.metrics.output_tokens !== null) && (
+                  <>
+                    <dt>Tokens</dt>
+                    <dd>
+                      {item.metrics.input_tokens ?? "—"} in / {item.metrics.output_tokens ?? "—"} out
+                      {item.metrics.tokens_per_second !== null
+                        ? ` (${item.metrics.tokens_per_second.toFixed(1)} tok/s)`
+                        : ""}
+                    </dd>
+                  </>
+                )}
+              </dl>
+            </details>
           )}
 
           <label className="batch-item__approve">
