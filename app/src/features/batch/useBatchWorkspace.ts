@@ -104,6 +104,7 @@ export function useBatchWorkspace(): UseBatchWorkspaceResult {
             status,
             proposal: job.proposal,
             metrics: job.metrics,
+            memoryWarning: job.memory_warning,
             error: job.error,
           });
           if (status === "queued" || status === "running") {
@@ -129,6 +130,7 @@ export function useBatchWorkspace(): UseBatchWorkspaceResult {
           proposal: null,
           editedFilename: null,
           metrics: null,
+          memoryWarning: null,
           error: null,
         }),
       ),
@@ -197,7 +199,11 @@ export function useBatchWorkspace(): UseBatchWorkspaceResult {
               void cancelJob(job.id).catch(() => {});
               return;
             }
-            updateItem(item.id, { status: statusFromJob(job.status), jobId: job.id });
+            updateItem(item.id, {
+              status: statusFromJob(job.status),
+              jobId: job.id,
+              memoryWarning: job.memory_warning,
+            });
             pollJob(item.id, job.id);
           })
           .catch((err) => {

@@ -50,6 +50,12 @@ export function BatchItemRow({
         <span className="batch-item__status">{STATUS_LABELS[item.status]}</span>
       </div>
 
+      {item.memoryWarning && (
+        <p className="batch-item__memory-warning" role="status">
+          {item.memoryWarning}
+        </p>
+      )}
+
       {canReview && item.proposal && (
         <div className="batch-item__review">
           <label>

@@ -2,7 +2,9 @@
 
 Every field below is copied from Hugging Face's model API (config sha,
 per-file LFS sha256/size) at the pinned revision, not invented; re-verify
-against the repository before bumping a revision.
+against the repository before bumping a revision. The one exception is
+estimated_memory_gb, which comes from real on-device measurement (MPS driver
+memory during generation on a 16 GB Mac), not from repository metadata.
 """
 
 from invoice_renamer.models.catalog import MemoryTier, ModelCatalogEntry, ModelFile
@@ -15,6 +17,7 @@ GRANITE_3_3_2B_INSTRUCT = ModelCatalogEntry(
     revision="707f574c62054322f6b5b04b6d075f0a8f05e0f0",
     memory_tier=MemoryTier.SMALL,
     prompt_template="granite-instruct",
+    estimated_memory_gb=8.23,
     files=[
         ModelFile(
             path="added_tokens.json",
@@ -82,6 +85,7 @@ QWEN3_0_6B = ModelCatalogEntry(
     revision="c1899de289a04d12100db370d81485cdf75e47ca",
     memory_tier=MemoryTier.SMALL,
     prompt_template="chatml",
+    estimated_memory_gb=2.18,
     files=[
         ModelFile(
             path="config.json",

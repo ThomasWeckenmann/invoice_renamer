@@ -91,6 +91,11 @@
   color: #b91c1c;
 }
 
+.batch-item__memory-warning {
+  color: #92400e;
+  font-size: 0.85rem;
+}
+
 .batch-item__renamed {
   color: #15803d;
 }

@@ -43,15 +43,40 @@ class LoadInstalledFn(Protocol):
 
 class ModelRuntime:
     """Not thread-safe by design: only the analysis worker thread (one thread,
-    one job at a time) ever calls get_or_load(), so no internal lock is needed."""
+    one job at a time) ever calls get_or_load()/mark_warmed(), so no internal
+    lock is needed. loaded_entry_id() and is_warmed() are the exceptions - plain
+    attribute reads safe to call from another thread (e.g. a request handler
+    checking what's resident for a pre-flight estimate) since a snapshot that's
+    a call away from stale is already the expected shape of that kind of check."""
 
     def __init__(self, *, load_installed: LoadInstalledFn | None = None) -> None:
         self._loaded: tuple[str, str | None] | None = None
         self._extractor: TransformersExtractor | None = None
+        # True once the currently loaded model has completed at least one
+        # generate() call. A model's measured memory footprint (used to credit
+        # pre-flight checks - see analyses_routes.py) reflects steady-state
+        # inference, not just its freshly-loaded weights, so callers should
+        # not treat that figure as trustworthy until this is true.
+        self._warmed = False
         # Lazily resolved (not a bound default argument) so tests can
         # monkeypatch TransformersExtractor.load_installed after construction,
         # same pattern as installer.py's FetchFn.
         self._load_installed = load_installed
+
+    def loaded_entry_id(self) -> str | None:
+        """The id of the currently cached model, or None if nothing is loaded."""
+        return self._loaded[0] if self._loaded is not None else None
+
+    def is_warmed(self) -> bool:
+        """Whether the currently loaded model has completed at least one
+        generate() call."""
+        return self._warmed
+
+    def mark_warmed(self) -> None:
+        """Records that the currently loaded model has finished a successful
+        inference call. Call only from the worker thread, right after a job
+        using it completes."""
+        self._warmed = True
 
     def get_or_load(
         self, entry: ModelCatalogEntry, data_dir: Path, device: str
@@ -78,6 +103,7 @@ class ModelRuntime:
         del self._extractor
         self._extractor = None
         self._loaded = None
+        self._warmed = False
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()

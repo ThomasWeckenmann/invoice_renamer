@@ -27,6 +27,7 @@ export interface BatchItem {
   proposal: FilenameProposal | null;
   editedFilename: string | null;
   metrics: RunMetrics | null;
+  memoryWarning: string | null;
   error: string | null;
 }
 

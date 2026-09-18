@@ -45,6 +45,56 @@ def test_get_or_load_caches_on_repeated_calls_with_the_same_key(tmp_path: Path) 
     assert len(calls) == 1
 
 
+def test_loaded_entry_id_is_none_until_something_is_loaded(tmp_path: Path) -> None:
+    def fake_loader(entry: ModelCatalogEntry, data_dir: Path, *, device: str) -> _FakeExtractor:
+        return _FakeExtractor()
+
+    runtime = ModelRuntime(load_installed=fake_loader)  # type: ignore[arg-type]
+    assert runtime.loaded_entry_id() is None
+
+    runtime.get_or_load(_entry("model-a"), tmp_path, "cpu")
+    assert runtime.loaded_entry_id() == "model-a"
+
+
+def test_is_warmed_starts_false_and_only_becomes_true_when_marked(tmp_path: Path) -> None:
+    def fake_loader(entry: ModelCatalogEntry, data_dir: Path, *, device: str) -> _FakeExtractor:
+        return _FakeExtractor()
+
+    runtime = ModelRuntime(load_installed=fake_loader)  # type: ignore[arg-type]
+    assert runtime.is_warmed() is False
+
+    runtime.get_or_load(_entry("model-a"), tmp_path, "cpu")
+    assert runtime.is_warmed() is False  # loaded, but no generate() call has completed yet
+
+    runtime.mark_warmed()
+    assert runtime.is_warmed() is True
+
+
+def test_is_warmed_survives_reuse_of_the_same_cached_model(tmp_path: Path) -> None:
+    def fake_loader(entry: ModelCatalogEntry, data_dir: Path, *, device: str) -> _FakeExtractor:
+        return _FakeExtractor()
+
+    runtime = ModelRuntime(load_installed=fake_loader)  # type: ignore[arg-type]
+    entry = _entry("model-a")
+    runtime.get_or_load(entry, tmp_path, "cpu")
+    runtime.mark_warmed()
+
+    runtime.get_or_load(entry, tmp_path, "cpu")  # cache hit, same key
+    assert runtime.is_warmed() is True
+
+
+def test_is_warmed_resets_when_a_different_model_loads(tmp_path: Path) -> None:
+    def fake_loader(entry: ModelCatalogEntry, data_dir: Path, *, device: str) -> _FakeExtractor:
+        return _FakeExtractor()
+
+    runtime = ModelRuntime(load_installed=fake_loader)  # type: ignore[arg-type]
+    runtime.get_or_load(_entry("model-a"), tmp_path, "cpu")
+    runtime.mark_warmed()
+
+    runtime.get_or_load(_entry("model-b"), tmp_path, "cpu")
+    assert runtime.is_warmed() is False
+
+
 def test_get_or_load_with_a_different_entry_reloads(tmp_path: Path) -> None:
     def fake_loader(entry: ModelCatalogEntry, data_dir: Path, *, device: str) -> _FakeExtractor:
         return _FakeExtractor()

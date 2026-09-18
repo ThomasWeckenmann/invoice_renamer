@@ -52,6 +52,7 @@ export interface AnalysisJobView {
   proposal: FilenameProposal | null;
   metrics: RunMetrics | null;
   error: string | null;
+  memory_warning: string | null;
 }
 
 export type MemoryTier = "small" | "medium" | "large";
@@ -71,6 +72,7 @@ export interface ModelCatalogEntry {
   files: ModelFile[];
   memory_tier: MemoryTier;
   prompt_template: string | null;
+  estimated_memory_gb: number | null;
 }
 
 export type InstallStatus = "not_installed" | "downloading" | "installed" | "verification_failed";

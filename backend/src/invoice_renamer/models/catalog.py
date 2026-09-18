@@ -39,6 +39,17 @@ class ModelCatalogEntry(BaseModel):
     files: list[ModelFile] = Field(min_length=1)
     memory_tier: MemoryTier
     prompt_template: str | None = None
+    # Measured, not estimated from file size: peak runtime memory observed
+    # during real inference (e.g. MPS driver allocation), when known. None
+    # means no measurement exists yet, not that the model is free to run.
+    estimated_memory_gb: float | None = None
+
+    @field_validator("estimated_memory_gb")
+    @classmethod
+    def _validate_positive_estimate(cls, value: float | None) -> float | None:
+        if value is not None and value <= 0:
+            raise ValueError("estimated_memory_gb must be positive")
+        return value
 
     @property
     def total_size_bytes(self) -> int:

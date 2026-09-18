@@ -27,6 +27,7 @@ function queuedJob(overrides: Partial<AnalysisJobView> = {}): AnalysisJobView {
     proposal: null,
     metrics: null,
     error: null,
+    memory_warning: null,
     ...overrides,
   };
 }

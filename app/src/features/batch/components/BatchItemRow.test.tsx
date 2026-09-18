@@ -29,6 +29,7 @@ function reviewItem(overrides: Partial<BatchItem> = {}): BatchItem {
     },
     editedFilename: null,
     metrics: null,
+    memoryWarning: null,
     error: null,
     ...overrides,
   };
@@ -37,6 +38,46 @@ function reviewItem(overrides: Partial<BatchItem> = {}): BatchItem {
 const noop = () => {};
 
 describe("BatchItemRow", () => {
+  it("shows a memory warning when the job carries one, regardless of review status", () => {
+    render(
+      <ul>
+        <BatchItemRow
+          item={reviewItem({
+            status: "queued",
+            proposal: null,
+            memoryWarning:
+              "Granite 3.3 2B Instruct typically uses about 8.2 GB of memory during " +
+              "analysis, but only 1.5 GB is currently free.",
+          })}
+          onEditFilename={noop}
+          onApprove={noop}
+          onUnapprove={noop}
+          onCancel={noop}
+          onRemove={noop}
+        />
+      </ul>,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent("currently free");
+  });
+
+  it("renders no memory warning when the job has none", () => {
+    render(
+      <ul>
+        <BatchItemRow
+          item={reviewItem()}
+          onEditFilename={noop}
+          onApprove={noop}
+          onUnapprove={noop}
+          onCancel={noop}
+          onRemove={noop}
+        />
+      </ul>,
+    );
+
+    expect(screen.queryByText(/currently free/)).not.toBeInTheDocument();
+  });
+
   it("renders no run-details disclosure when metrics are absent", () => {
     render(
       <ul>

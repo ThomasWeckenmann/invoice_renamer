@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 0.18.0 (2026-09-18, claude sonnet-5)
+
+- Warn before a job starts if free memory looks thin for the selected model
+
+  ModelCatalogEntry gets an optional estimated_memory_gb (measured MPS
+  driver memory, set for both shipped models). POST /analyses compares it
+  against free RAM, crediting back a resident model's footprint only once
+  it has actually run once, and attaches an advisory memory_warning.
+
 ## Version 0.17.1 (2026-09-18, claude sonnet-5)
 
 - bugfix: strip punctuation from filename segments deterministically instead of trusting model output

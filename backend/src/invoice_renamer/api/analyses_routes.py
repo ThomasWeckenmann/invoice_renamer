@@ -8,9 +8,11 @@ from enum import Enum
 from pathlib import Path
 from uuid import uuid4
 
+import psutil
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 
+from invoice_renamer.analysis.memory_preflight import check_memory_headroom
 from invoice_renamer.analysis.pipeline import run_document_analysis
 from invoice_renamer.inference.runtime import LoadInstalledFn, ModelRuntime, select_device
 from invoice_renamer.metrics.models import RunMetrics
@@ -26,6 +28,11 @@ analyses_router = APIRouter()
 _MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 _MAX_PENDING_BYTES = 500 * 1024 * 1024  # ~10 max-size PDFs queued/running at once
 _PDF_MAGIC = b"%PDF-"
+_BYTES_PER_GB = 1024**3
+
+
+def _available_memory_gb() -> float:
+    return psutil.virtual_memory().available / _BYTES_PER_GB
 
 
 class JobStatus(str, Enum):
@@ -47,6 +54,7 @@ class AnalysisJob:
     metrics: RunMetrics | None = None
     error: str | None = None
     cancel_requested: bool = False
+    memory_warning: str | None = None
 
 
 class AnalysisJobView(BaseModel):
@@ -59,6 +67,7 @@ class AnalysisJobView(BaseModel):
     proposal: FilenameProposal | None = None
     metrics: RunMetrics | None = None
     error: str | None = None
+    memory_warning: str | None = None
 
 
 def _job_view(job: AnalysisJob) -> AnalysisJobView:
@@ -70,14 +79,22 @@ def _job_view(job: AnalysisJob) -> AnalysisJobView:
         proposal=job.proposal,
         metrics=job.metrics,
         error=job.error,
+        memory_warning=job.memory_warning,
     )
 
 
-def _entry_or_404(model_id: str) -> ModelCatalogEntry:
+def _entry_by_id(model_id: str) -> ModelCatalogEntry | None:
     for entry in SHORTLISTED_CATALOG:
         if entry.id == model_id:
             return entry
-    raise HTTPException(404, f"unknown model id: {model_id}")
+    return None
+
+
+def _entry_or_404(model_id: str) -> ModelCatalogEntry:
+    entry = _entry_by_id(model_id)
+    if entry is None:
+        raise HTTPException(404, f"unknown model id: {model_id}")
+    return entry
 
 
 class AnalysisCoordinator:
@@ -90,6 +107,7 @@ class AnalysisCoordinator:
         *,
         load_installed: LoadInstalledFn | None = None,
         capabilities_fn: Callable[[], SystemCapabilities] | None = None,
+        available_memory_gb_fn: Callable[[], float] | None = None,
     ) -> None:
         self._lock = threading.Lock()
         self._condition = threading.Condition(self._lock)
@@ -98,6 +116,7 @@ class AnalysisCoordinator:
         self._data_dir = data_dir
         self._runtime = ModelRuntime(load_installed=load_installed)
         self._capabilities_fn = capabilities_fn or (lambda: detect_capabilities(disk_path=data_dir))
+        self._available_memory_gb_fn = available_memory_gb_fn or _available_memory_gb
         self._worker = threading.Thread(target=self._worker_loop, daemon=True)
         self._worker.start()
 
@@ -106,12 +125,27 @@ class AnalysisCoordinator:
     ) -> AnalysisJob:
         if not is_installed(entry, self._data_dir):
             raise HTTPException(422, f"model {entry.id!r} is not installed")
+        loaded_id = self._runtime.loaded_entry_id()
+        resident_entry = _entry_by_id(loaded_id) if loaded_id is not None else None
+        # Only credit a resident model's *measured* footprint once it's
+        # actually reached it - right after loading, before its first
+        # generate() call, real usage can be well under that figure.
+        resident_memory_gb = (
+            resident_entry.estimated_memory_gb
+            if resident_entry is not None
+            and resident_entry.estimated_memory_gb is not None
+            and self._runtime.is_warmed()
+            else 0.0
+        )
         job = AnalysisJob(
             id=str(uuid4()),
             model_id=entry.id,
             original_filename=original_filename,
             status=JobStatus.QUEUED,
             pdf_bytes=pdf_bytes,
+            memory_warning=check_memory_headroom(
+                entry, self._available_memory_gb_fn(), resident_memory_gb=resident_memory_gb
+            ),
         )
         with self._condition:
             pending = sum(
@@ -173,6 +207,10 @@ class AnalysisCoordinator:
                 proposal, metrics = run_document_analysis(
                     job.pdf_bytes, model, model_id=entry.id, model_revision=entry.revision
                 )
+                # generate() has now actually run on this loaded model, so its
+                # measured footprint is trustworthy for the next submission's
+                # pre-flight credit (see submit()).
+                self._runtime.mark_warmed()
             except Exception as exc:
                 with self._lock:
                     job.status, job.error, job.pdf_bytes = JobStatus.FAILED, str(exc), None
