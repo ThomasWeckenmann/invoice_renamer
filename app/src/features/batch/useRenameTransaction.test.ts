@@ -29,6 +29,7 @@ function approvedItem(overrides: Partial<BatchItem> = {}): BatchItem {
       },
       proposed_filename: "2026-01-05_Acme_Widget_42-EUR.pdf",
       requires_review: false,
+      missing_fields: [],
     },
     editedFilename: null,
     metrics: null,

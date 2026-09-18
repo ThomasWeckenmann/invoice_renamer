@@ -14,20 +14,30 @@ strict JSON object with exactly these keys:
   distinguishable), or null
 - product_summary: the main expensive product if one clearly dominates,
   otherwise a short summary; keep it in the invoice's own language and
-  preserve brand/model names, or null
+  preserve brand/model names, or null. Keep it short (a few words)
 - gross_total: the final invoice total the customer must pay, including VAT,
-  as a plain number - look for a line labeled "Rechnungsbetrag", "Gesamtbetrag",
-  "Total", "Invoice Total", or "Amount Due". Do NOT return a net/pre-tax amount
-  (labeled e.g. "Nettobetrag", "Net Amount", "Subtotal") - that is a different,
-  smaller number on the same invoice. If no gross total is labeled, use null -
-  never substitute the net amount
+  as a plain number. KEEP THE DECIMAL POINT: "21.42" stays 21.42, never
+  2142. "37.46" stays 37.46, never 3746. This is the one exception to the
+  no-punctuation rule below - that rule is for seller/product_summary text,
+  not for this number, and the decimal point here is required. Convert
+  only if the invoice itself uses a different format: German-style
+  "1.234,56" becomes 1234.56. Look for a line labeled "Rechnungsbetrag",
+  "Gesamtbetrag", "Total", "Invoice Total", or "Amount Due". Do NOT return
+  a net/pre-tax amount (labeled e.g. "Nettobetrag", "Net Amount",
+  "Subtotal") - that is a different, smaller number on the same invoice.
+  If no gross total is labeled, use null - never substitute the net amount
 - currency: the ISO-4217 currency code, or null
 - language: "de", "en", or "unknown"
-- warnings: a list of short strings describing anything uncertain
 
-Never guess a value you are not confident in - use null instead. Respond
-with the raw JSON object only: no markdown code fences, no surrounding
-text."""
+seller and product_summary become part of a filename: use only letters,
+digits, hyphens, and underscores - no spaces, quotes, slashes, colons,
+parentheses, or other punctuation (e.g. "MacBook Air" becomes
+"MacBook-Air", "Müller & Söhne GmbH" becomes "Mueller-Soehne-GmbH").
+Also make it as short as possible.
+
+Never guess a value you are not confident in - use null instead. Do not add
+any keys beyond the ones listed above. Respond with the raw JSON object
+only: no markdown code fences, no surrounding text."""
 
 
 def build_extraction_prompt(document: NormalizedDocument) -> str:

@@ -29,9 +29,7 @@ def extract_invoice(
     while True:
         try:
             extraction = _parse(response)
-            return extraction.model_copy(
-                update={"warnings": [*document.warnings, *extraction.warnings]}
-            )
+            return extraction.model_copy(update={"warnings": document.warnings})
         except (json.JSONDecodeError, ValidationError) as error:
             if attempts >= max_repair_attempts:
                 # Includes the raw response (truncated) so a saved report can show
@@ -59,4 +57,9 @@ def _strip_markdown_fence(response: str) -> str:
 
 def _parse(response: str) -> InvoiceExtraction:
     data = json.loads(_strip_markdown_fence(response))
+    # The model is no longer asked for warnings, but instruct-tuned models
+    # commonly echo one back out of training habit; drop it so it can't
+    # leak model-authored text into a field only code should populate.
+    if isinstance(data, dict):
+        data.pop("warnings", None)
     return InvoiceExtraction.model_validate(data)

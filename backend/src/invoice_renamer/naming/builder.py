@@ -86,17 +86,22 @@ def build_filename_proposal(extraction: InvoiceExtraction) -> FilenameProposal:
 
     stem = f"{prefix}{suffix}"
 
-    requires_review = (
-        date_missing
-        or seller_missing
-        or product_missing
-        or amount_missing
-        or currency_missing
-        or bool(extraction.warnings)
-    )
+    missing_fields = [
+        name
+        for name, missing in (
+            ("date", date_missing),
+            ("seller", seller_missing),
+            ("product", product_missing),
+            ("amount", amount_missing),
+            ("currency", currency_missing),
+        )
+        if missing
+    ]
+    requires_review = bool(missing_fields) or bool(extraction.warnings)
 
     return FilenameProposal(
         extraction=extraction,
         proposed_filename=f"{stem}.pdf",
         requires_review=requires_review,
+        missing_fields=missing_fields,
     )

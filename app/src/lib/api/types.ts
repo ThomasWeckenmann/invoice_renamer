@@ -23,6 +23,7 @@ export interface FilenameProposal {
   extraction: InvoiceExtraction;
   proposed_filename: string;
   requires_review: boolean;
+  missing_fields: string[];
 }
 
 export interface RunMetrics {

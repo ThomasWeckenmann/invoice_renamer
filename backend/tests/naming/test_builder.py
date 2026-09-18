@@ -24,6 +24,7 @@ def test_full_extraction_produces_expected_filename() -> None:
 
     assert proposal.proposed_filename == "2026-09-12_Apple_MacBook-Air_2180-EUR.pdf"
     assert proposal.requires_review is False
+    assert proposal.missing_fields == []
 
 
 def test_missing_date_uses_placeholder_and_requires_review() -> None:
@@ -31,6 +32,7 @@ def test_missing_date_uses_placeholder_and_requires_review() -> None:
 
     assert proposal.proposed_filename.startswith("0000-00-00_")
     assert proposal.requires_review is True
+    assert proposal.missing_fields == ["date"]
 
 
 def test_missing_seller_uses_placeholder_and_requires_review() -> None:
@@ -38,6 +40,7 @@ def test_missing_seller_uses_placeholder_and_requires_review() -> None:
 
     assert "_Unknown_" in proposal.proposed_filename
     assert proposal.requires_review is True
+    assert proposal.missing_fields == ["seller"]
 
 
 def test_missing_currency_uses_placeholder_and_requires_review() -> None:
@@ -45,12 +48,14 @@ def test_missing_currency_uses_placeholder_and_requires_review() -> None:
 
     assert proposal.proposed_filename.endswith("-XXX.pdf")
     assert proposal.requires_review is True
+    assert proposal.missing_fields == ["currency"]
 
 
 def test_warnings_force_review_even_when_fields_are_complete() -> None:
     proposal = build_filename_proposal(_extraction(warnings=["low OCR confidence"]))
 
     assert proposal.requires_review is True
+    assert proposal.missing_fields == []
 
 
 def test_german_umlauts_are_transliterated() -> None:

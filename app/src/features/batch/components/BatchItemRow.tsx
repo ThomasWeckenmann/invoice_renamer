@@ -87,18 +87,24 @@ export function BatchItemRow({
             </dl>
           )}
 
-          {item.proposal.requires_review && (
+          {item.proposal.missing_fields.length > 0 && (
             <p className="batch-item__flag" role="status">
-              Missing required fields — please review before approving.
+              Missing required field{item.proposal.missing_fields.length > 1 ? "s" : ""}:{" "}
+              {item.proposal.missing_fields.join(", ")} — please review before approving.
             </p>
           )}
 
           {extraction && extraction.warnings.length > 0 && (
-            <ul className="batch-item__warnings">
-              {extraction.warnings.map((warning) => (
-                <li key={warning}>{warning}</li>
-              ))}
-            </ul>
+            <>
+              <p className="batch-item__flag" role="status">
+                Review the warnings below before approving.
+              </p>
+              <ul className="batch-item__warnings">
+                {extraction.warnings.map((warning) => (
+                  <li key={warning}>{warning}</li>
+                ))}
+              </ul>
+            </>
           )}
 
           <label className="batch-item__approve">

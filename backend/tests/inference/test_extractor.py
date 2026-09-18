@@ -13,7 +13,6 @@ _VALID_JSON = json.dumps(
         "gross_total": "2180",
         "currency": "EUR",
         "language": "en",
-        "warnings": [],
     }
 )
 
@@ -128,7 +127,7 @@ def test_document_warnings_are_preserved_on_success() -> None:
     assert "page 1: low OCR confidence on the total" in extraction.warnings
 
 
-def test_document_warnings_are_preserved_alongside_model_warnings() -> None:
+def test_model_supplied_warnings_are_dropped() -> None:
     document = _document(warnings=["page 1: low OCR confidence on the total"])
     response = json.dumps({**json.loads(_VALID_JSON), "warnings": ["ambiguous product name"]})
     model = _ScriptedLanguageModel([response])
@@ -136,7 +135,7 @@ def test_document_warnings_are_preserved_alongside_model_warnings() -> None:
     extraction = extract_invoice(document, model)
 
     assert "page 1: low OCR confidence on the total" in extraction.warnings
-    assert "ambiguous product name" in extraction.warnings
+    assert "ambiguous product name" not in extraction.warnings
 
 
 def test_document_warnings_are_preserved_on_repeated_failure() -> None:

@@ -23,3 +23,24 @@ def test_gross_total_instruction_does_not_permit_a_net_fallback() -> None:
 
     assert "fall back to a net amount" not in prompt.casefold()
     assert "use null" in prompt.casefold()
+
+
+def test_prompt_does_not_request_warnings_from_the_model() -> None:
+    prompt = " ".join(build_extraction_prompt(_document("irrelevant")).casefold().split())
+
+    assert "warnings" not in prompt
+    assert "do not add any keys" in prompt
+
+
+def test_product_summary_instruction_asks_for_short_text() -> None:
+    prompt = " ".join(build_extraction_prompt(_document("irrelevant")).casefold().split())
+
+    assert "keep it short" in prompt
+
+
+def test_seller_and_product_summary_are_restricted_to_filename_safe_characters() -> None:
+    prompt = " ".join(build_extraction_prompt(_document("irrelevant")).casefold().split())
+
+    assert "become part of a filename" in prompt
+    assert "macbook-air" in prompt
+    assert "mueller-soehne-gmbh" in prompt

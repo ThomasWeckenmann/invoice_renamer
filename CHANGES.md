@@ -1,5 +1,21 @@
 # Changelog
 
+## Version 0.16.1 (2026-09-17, claude sonnet-5)
+
+- bugfix: stop the review banner from claiming fields are missing when they aren't
+
+  requires_review also went true for unrelated extraction warnings, so a
+  fully-extracted invoice could show 'Missing required fields'. A new
+  missing_fields list on FilenameProposal lets the UI show the accurate
+  reason: which fields are actually missing, versus warnings to review.
+
+- stop asking the model for warnings; keep only code-generated ones
+
+  Tightening the prompt didn't stop invoice boilerplate leaking in, so
+  the model is no longer asked for warnings at all - missing_fields
+  already covers missing values, and a stray warnings key from the
+  model is now dropped before validation so it can't sneak back in.
+
 ## Version 0.16.0 (2026-09-17, claude sonnet-5)
 
 - Enable release app bundling and document self-build steps in README.md
