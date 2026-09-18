@@ -1,5 +1,12 @@
 # Changelog
 
+## Version 0.18.2 (2026-09-18, claude sonnet-5)
+
+- Rename the displayed 'Needs review' status to 'Awaiting approval'
+
+  Display label only; the internal needs_review state and behavior are
+  unchanged.
+
 ## Version 0.18.1 (2026-09-18, claude sonnet-5)
 
 - bugfix: make worker shutdown reliable so it can't outlive the app

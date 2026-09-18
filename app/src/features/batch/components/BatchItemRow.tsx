@@ -20,7 +20,7 @@ const STATUS_LABELS: Record<BatchItem["status"], string> = {
   pending: "Pending",
   queued: "Queued",
   running: "Analyzing…",
-  needs_review: "Needs review",
+  needs_review: "Awaiting approval",
   approved: "Approved",
   failed: "Failed",
   cancelled: "Cancelled",
