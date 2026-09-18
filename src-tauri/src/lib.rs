@@ -7,7 +7,7 @@ mod worker;
 
 use std::sync::Mutex;
 
-use tauri::{Manager, RunEvent};
+use tauri::{Manager, RunEvent, WindowEvent};
 
 use commands::WorkerState;
 
@@ -28,6 +28,16 @@ pub fn run() {
             let _ = app.manage::<WorkerState>(Mutex::new(Some(worker)));
             Ok(())
         })
+        // macOS otherwise leaves the app (and the worker) running with no
+        // window once the last one closes, per platform convention; this
+        // app has no tray/background story, so closing its one window
+        // should mean quitting, matching Linux's default behavior and
+        // funneling both through the same RunEvent::Exit cleanup below.
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { .. } = event {
+                window.app_handle().exit(0);
+            }
+        })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
@@ -38,7 +48,7 @@ pub fn run() {
                     .unwrap_or_else(|poisoned| poisoned.into_inner())
                     .take();
                 if let Some(worker) = worker {
-                    worker.kill();
+                    tauri::async_runtime::block_on(worker.shutdown());
                 }
             }
         });

@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 0.18.1 (2026-09-18, claude sonnet-5)
+
+- bugfix: make worker shutdown reliable so it can't outlive the app
+
+  Killing only the PyInstaller launcher left its forked Python child (and
+  tesseract subprocess) orphaned; shutdown now signals the whole process
+  group and confirms it's empty. Closing the window now quits the app too,
+  and a closed stdout pipe with no ready marker no longer looks like success.
+
 ## Version 0.18.0 (2026-09-18, claude sonnet-5)
 
 - Warn before a job starts if free memory looks thin for the selected model
