@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 0.21.0 (2026-09-18, claude design, claude sonnet-5 , claude opus-5)
+
+- Redesign the batch workspace visual style
+
+  Applies a token-based light theme (color, spacing, monospace filenames,
+  status pills, run-details grid) across BatchWorkspace, BatchList,
+  BatchItemRow, ImportDropzone, and ModelSelector. Presentation only - no
+  changes to component props, hooks, or the native window chrome.
+
 ## Version 0.20.0 (2026-09-18, claude sonnet-5)
 
 - Add a Re-Run button for cancelled, failed, and reviewed batch items

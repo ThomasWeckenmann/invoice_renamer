@@ -58,8 +58,8 @@ describe("BatchItemRow", () => {
           onApprove={noop}
           onUnapprove={noop}
           onCancel={noop}
-          onRerun={noop}
-          canRerun={true}
+          onAnalyze={noop}
+          canAnalyze={true}
           onRemove={noop}
         />
       </ul>,
@@ -77,8 +77,8 @@ describe("BatchItemRow", () => {
           onApprove={noop}
           onUnapprove={noop}
           onCancel={noop}
-          onRerun={noop}
-          canRerun={true}
+          onAnalyze={noop}
+          canAnalyze={true}
           onRemove={noop}
         />
       </ul>,
@@ -96,8 +96,8 @@ describe("BatchItemRow", () => {
           onApprove={noop}
           onUnapprove={noop}
           onCancel={noop}
-          onRerun={noop}
-          canRerun={true}
+          onAnalyze={noop}
+          canAnalyze={true}
           onRemove={noop}
         />
       </ul>,
@@ -131,8 +131,8 @@ describe("BatchItemRow", () => {
           onApprove={noop}
           onUnapprove={noop}
           onCancel={noop}
-          onRerun={noop}
-          canRerun={true}
+          onAnalyze={noop}
+          canAnalyze={true}
           onRemove={noop}
         />
       </ul>,
@@ -171,8 +171,8 @@ describe("BatchItemRow", () => {
           onApprove={noop}
           onUnapprove={noop}
           onCancel={noop}
-          onRerun={noop}
-          canRerun={true}
+          onAnalyze={noop}
+          canAnalyze={true}
           onRemove={noop}
         />
       </ul>,
@@ -183,9 +183,9 @@ describe("BatchItemRow", () => {
   });
 });
 
-describe("BatchItemRow rerun action", () => {
+describe("BatchItemRow analyze action", () => {
   it("offers Re-Run for a cancelled item and calls back with its id", () => {
-    const onRerun = vi.fn();
+    const onAnalyze = vi.fn();
     render(
       <ul>
         <BatchItemRow
@@ -194,8 +194,8 @@ describe("BatchItemRow rerun action", () => {
           onApprove={noop}
           onUnapprove={noop}
           onCancel={noop}
-          onRerun={onRerun}
-          canRerun={true}
+          onAnalyze={onAnalyze}
+          canAnalyze={true}
           onRemove={noop}
         />
       </ul>,
@@ -204,7 +204,7 @@ describe("BatchItemRow rerun action", () => {
     const button = screen.getByRole("button", { name: "Re-Run" });
     fireEvent.click(button);
 
-    expect(onRerun).toHaveBeenCalledWith("item-1");
+    expect(onAnalyze).toHaveBeenCalledWith("item-1");
   });
 
   it("offers Re-Run for a failed item, disabled when no model is selected", () => {
@@ -216,8 +216,8 @@ describe("BatchItemRow rerun action", () => {
           onApprove={noop}
           onUnapprove={noop}
           onCancel={noop}
-          onRerun={noop}
-          canRerun={false}
+          onAnalyze={noop}
+          canAnalyze={false}
           onRemove={noop}
         />
       </ul>,
@@ -240,8 +240,8 @@ describe("BatchItemRow rerun action", () => {
           onApprove={noop}
           onUnapprove={noop}
           onCancel={noop}
-          onRerun={noop}
-          canRerun={true}
+          onAnalyze={noop}
+          canAnalyze={true}
           onRemove={noop}
         />
       </ul>,
@@ -250,7 +250,8 @@ describe("BatchItemRow rerun action", () => {
     expect(screen.queryByRole("button", { name: "Re-Run" })).not.toBeInTheDocument();
   });
 
-  it("does not offer Re-Run for a pending item", () => {
+  it("offers a pending item Analyze rather than Re-Run, and calls back with its id", () => {
+    const onAnalyze = vi.fn();
     render(
       <ul>
         <BatchItemRow
@@ -259,14 +260,38 @@ describe("BatchItemRow rerun action", () => {
           onApprove={noop}
           onUnapprove={noop}
           onCancel={noop}
-          onRerun={noop}
-          canRerun={true}
+          onAnalyze={onAnalyze}
+          canAnalyze={true}
           onRemove={noop}
         />
       </ul>,
     );
 
     expect(screen.queryByRole("button", { name: "Re-Run" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Analyze" }));
+
+    expect(onAnalyze).toHaveBeenCalledWith("item-1");
+  });
+
+  it("offers neither Analyze nor Re-Run while a job is in flight", () => {
+    render(
+      <ul>
+        <BatchItemRow
+          item={reviewItem({ status: "running", proposal: null })}
+          onEditFilename={noop}
+          onApprove={noop}
+          onUnapprove={noop}
+          onCancel={noop}
+          onAnalyze={noop}
+          canAnalyze={true}
+          onRemove={noop}
+        />
+      </ul>,
+    );
+
+    expect(screen.queryByRole("button", { name: "Analyze" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Re-Run" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
   });
 });
 
@@ -284,8 +309,8 @@ describe("BatchItemRow open action", () => {
           onApprove={noop}
           onUnapprove={noop}
           onCancel={noop}
-          onRerun={noop}
-          canRerun={true}
+          onAnalyze={noop}
+          canAnalyze={true}
           onRemove={noop}
         />
       </ul>,
@@ -304,8 +329,8 @@ describe("BatchItemRow open action", () => {
           onApprove={noop}
           onUnapprove={noop}
           onCancel={noop}
-          onRerun={noop}
-          canRerun={true}
+          onAnalyze={noop}
+          canAnalyze={true}
           onRemove={noop}
         />
       </ul>,
@@ -333,8 +358,8 @@ describe("BatchItemRow open action", () => {
           onApprove={noop}
           onUnapprove={noop}
           onCancel={noop}
-          onRerun={noop}
-          canRerun={true}
+          onAnalyze={noop}
+          canAnalyze={true}
           onRemove={noop}
         />
       </ul>,
@@ -357,8 +382,8 @@ describe("BatchItemRow open action", () => {
           onApprove={noop}
           onUnapprove={noop}
           onCancel={noop}
-          onRerun={noop}
-          canRerun={true}
+          onAnalyze={noop}
+          canAnalyze={true}
           onRemove={noop}
         />
       </ul>,

@@ -14,8 +14,8 @@ interface BatchItemRowProps {
   onApprove: (id: string) => void;
   onUnapprove: (id: string) => void;
   onCancel: (id: string) => void;
-  onRerun: (id: string) => void;
-  canRerun: boolean;
+  onAnalyze: (id: string) => void;
+  canAnalyze: boolean;
   onRemove: (id: string) => void;
 }
 
@@ -23,7 +23,7 @@ const STATUS_LABELS: Record<BatchItem["status"], string> = {
   pending: "Pending",
   queued: "Queued",
   running: "Analyzing…",
-  needs_review: "Awaiting approval",
+  needs_review: "Approve",
   approved: "Approved",
   failed: "Failed",
   cancelled: "Cancelled",
@@ -36,20 +36,25 @@ export function BatchItemRow({
   onApprove,
   onUnapprove,
   onCancel,
-  onRerun,
-  canRerun,
+  onAnalyze,
+  canAnalyze,
   onRemove,
 }: BatchItemRowProps) {
   const { extraction } = item.proposal ?? { extraction: null };
   const canReview = item.status === "needs_review" || item.status === "approved";
   const isRenamed = renameOutcome?.status === "renamed";
-  const canShowRerun =
-    !isRenamed &&
-    (item.status === "cancelled" ||
-      item.status === "failed" ||
-      item.status === "needs_review" ||
-      item.status === "approved");
+  // The backend attaches a memory pre-flight warning to the job at submit
+  // time and never clears it, so it's still there in the final poll
+  // response - stale advice once the run has moved past queued/running.
+  const showMemoryWarning =
+    item.memoryWarning !== null && (item.status === "queued" || item.status === "running");
+  // Every state except a job already in flight, which offers Cancel instead.
+  const showAnalyze = !isRenamed && item.status !== "queued" && item.status !== "running";
   const [openError, setOpenError] = useState<string | null>(null);
+  const metricsSummary = item.metrics
+    ? `${item.metrics.model_id} · ${formatDuration(item.metrics.total_ms)} · ` +
+      `${item.metrics.pages_total} page${item.metrics.pages_total === 1 ? "" : "s"}`
+    : "";
 
   const handleFilenameChange = (event: ChangeEvent<HTMLInputElement>) => {
     onEditFilename(item.id, event.target.value);
@@ -67,10 +72,34 @@ export function BatchItemRow({
     <li className="batch-item" data-status={item.status}>
       <div className="batch-item__header">
         <span className="batch-item__original-name">{item.file.name}</span>
-        <span className="batch-item__status">{STATUS_LABELS[item.status]}</span>
+        {canReview ? (
+          <label
+            className={`batch-item__status batch-item__status--toggle${
+              isRenamed ? " batch-item__status--locked" : ""
+            }`}
+          >
+            <input
+              type="checkbox"
+              className="batch-item__status-input"
+              checked={item.status === "approved"}
+              disabled={isRenamed}
+              onChange={(event) =>
+                event.target.checked ? onApprove(item.id) : onUnapprove(item.id)
+              }
+              aria-label={`${item.status === "approved" ? "Unapprove" : "Approve"} ${item.file.name}`}
+            />
+            <span className="batch-item__status-dot" aria-hidden="true" />
+            {STATUS_LABELS[item.status]}
+          </label>
+        ) : (
+          <span className="batch-item__status">
+            <span className="batch-item__status-dot" aria-hidden="true" />
+            {STATUS_LABELS[item.status]}
+          </span>
+        )}
       </div>
 
-      {item.memoryWarning && (
+      {showMemoryWarning && (
         <p className="batch-item__memory-warning" role="status">
           {item.memoryWarning}
         </p>
@@ -78,7 +107,7 @@ export function BatchItemRow({
 
       {canReview && item.proposal && (
         <div className="batch-item__review">
-          <label>
+          <label className="batch-item__filename-field">
             Proposed filename
             <input
               type="text"
@@ -135,26 +164,37 @@ export function BatchItemRow({
 
           {item.metrics && (
             <details className="batch-item__metrics">
-              <summary>Run details</summary>
+              <summary>
+                <span className="batch-item__metrics-label">Run details</span>
+                <span className="batch-item__metrics-summary">{metricsSummary}</span>
+              </summary>
               <dl>
-                <dt>Model</dt>
-                <dd>
-                  {item.metrics.model_id}
-                  {item.metrics.model_revision ? ` @ ${item.metrics.model_revision}` : ""}
-                </dd>
-                <dt>Total time</dt>
-                <dd>{formatDuration(item.metrics.total_ms)}</dd>
-                <dt>Inference time</dt>
-                <dd>{formatDuration(item.metrics.inference_ms)}</dd>
-                <dt>Pages</dt>
-                <dd>
-                  {item.metrics.pages_total}
-                  {item.metrics.pages_ocr.length > 0
-                    ? ` (${item.metrics.pages_ocr.length} via OCR)`
-                    : ""}
-                </dd>
+                <div>
+                  <dt>Model</dt>
+                  <dd>
+                    {item.metrics.model_id}
+                    {item.metrics.model_revision ? ` @ ${item.metrics.model_revision}` : ""}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Total time</dt>
+                  <dd>{formatDuration(item.metrics.total_ms)}</dd>
+                </div>
+                <div>
+                  <dt>Inference time</dt>
+                  <dd>{formatDuration(item.metrics.inference_ms)}</dd>
+                </div>
+                <div>
+                  <dt>Pages</dt>
+                  <dd>
+                    {item.metrics.pages_total}
+                    {item.metrics.pages_ocr.length > 0
+                      ? ` (${item.metrics.pages_ocr.length} via OCR)`
+                      : ""}
+                  </dd>
+                </div>
                 {(item.metrics.input_tokens !== null || item.metrics.output_tokens !== null) && (
-                  <>
+                  <div>
                     <dt>Tokens</dt>
                     <dd>
                       {item.metrics.input_tokens ?? "—"} in / {item.metrics.output_tokens ?? "—"} out
@@ -162,21 +202,11 @@ export function BatchItemRow({
                         ? ` (${item.metrics.tokens_per_second.toFixed(1)} tok/s)`
                         : ""}
                     </dd>
-                  </>
+                  </div>
                 )}
               </dl>
             </details>
           )}
-
-          <label className="batch-item__approve">
-            <input
-              type="checkbox"
-              checked={item.status === "approved"}
-              disabled={isRenamed}
-              onChange={(event) => (event.target.checked ? onApprove(item.id) : onUnapprove(item.id))}
-            />
-            Approve
-          </label>
         </div>
       )}
 
@@ -193,20 +223,25 @@ export function BatchItemRow({
       )}
 
       <div className="batch-item__actions">
-        <button type="button" onClick={handleOpen}>
+        <button type="button" className="btn sm" onClick={handleOpen}>
           Open
         </button>
         {(item.status === "queued" || item.status === "running") && (
-          <button type="button" onClick={() => onCancel(item.id)}>
+          <button type="button" className="btn sm" onClick={() => onCancel(item.id)}>
             Cancel
           </button>
         )}
-        {canShowRerun && (
-          <button type="button" disabled={!canRerun} onClick={() => onRerun(item.id)}>
-            Re-Run
+        {showAnalyze && (
+          <button
+            type="button"
+            className="btn sm"
+            disabled={!canAnalyze}
+            onClick={() => onAnalyze(item.id)}
+          >
+            {item.status === "pending" ? "Analyze" : "Re-Run"}
           </button>
         )}
-        <button type="button" onClick={() => onRemove(item.id)}>
+        <button type="button" className="btn sm" onClick={() => onRemove(item.id)}>
           Remove
         </button>
       </div>

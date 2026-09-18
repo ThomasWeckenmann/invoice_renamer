@@ -39,5 +39,5 @@ def check_memory_headroom(
     return (
         f"{entry.display_name} typically uses about {entry.estimated_memory_gb:.1f} GB of "
         f"memory during analysis, but only {available_gb:.1f} GB is currently free. "
-        "Consider closing other applications before starting this job."
+        "Consider closing other applications before running further jobs."
     )

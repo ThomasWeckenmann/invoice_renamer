@@ -32,7 +32,7 @@ function ModelRow({
 
   return (
     <div className="model-row" data-status={status}>
-      <label>
+      <label className="model-row__select">
         <input
           type="radio"
           name="selected-model"
@@ -40,11 +40,11 @@ function ModelRow({
           disabled={status !== "installed" || !model.compatible}
           onChange={onSelect}
         />
-        {entry.display_name}
+        <span className="model-row__name">{entry.display_name}</span>
       </label>
 
       {status === "not_installed" && (
-        <button type="button" onClick={onDownload} disabled={!model.compatible}>
+        <button type="button" className="btn sm" onClick={onDownload} disabled={!model.compatible}>
           Download
           {entry.files.length > 0
             ? ` (${formatBytes(entry.files.reduce((sum, file) => sum + file.size_bytes, 0))})`
@@ -60,13 +60,13 @@ function ModelRow({
       {status === "verification_failed" && (
         <span className="model-row__error">
           {model.error ?? "verification failed"}
-          <button type="button" onClick={onDownload}>
+          <button type="button" className="btn sm" onClick={onDownload}>
             Retry
           </button>
         </span>
       )}
       {status === "installed" && (
-        <button type="button" onClick={onRemove}>
+        <button type="button" className="btn sm" onClick={onRemove}>
           Remove
         </button>
       )}
@@ -93,15 +93,15 @@ export function ModelSelector({
   onRefresh,
 }: ModelSelectorProps) {
   if (loading && models.length === 0) {
-    return <p>Loading models…</p>;
+    return <p className="batch-workspace__note">Loading models…</p>;
   }
 
   return (
     <div className="model-selector">
       {error && (
-        <p role="alert">
+        <p role="alert" className="batch-workspace__note">
           {error}{" "}
-          <button type="button" onClick={onRefresh}>
+          <button type="button" className="btn sm" onClick={onRefresh}>
             Retry
           </button>
         </p>
@@ -110,7 +110,7 @@ export function ModelSelector({
       <fieldset>
         <legend>Models</legend>
         {models.length === 0 ? (
-          <p>No models available.</p>
+          <p className="batch-workspace__note">No models available.</p>
         ) : (
           models.map((model) => (
             <ModelRow
