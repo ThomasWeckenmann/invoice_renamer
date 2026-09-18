@@ -85,6 +85,30 @@ def test_whitespace_collapses_to_hyphen() -> None:
     assert "Multi-word-name" in proposal.proposed_filename
 
 
+def test_general_punctuation_is_stripped() -> None:
+    proposal = build_filename_proposal(
+        _extraction(product_summary="Platform Consumption, Tier 1 (Region).")
+    )
+
+    stem = proposal.proposed_filename.removesuffix(".pdf")
+    assert "Platform-Consumption-Tier-1-Region" in stem
+    for punct in ",().":
+        assert punct not in stem
+
+
+def test_punctuation_removal_does_not_leave_a_double_hyphen() -> None:
+    proposal = build_filename_proposal(_extraction(seller="Müller & Söhne GmbH"))
+
+    assert "Mueller-Soehne-GmbH" in proposal.proposed_filename
+    assert "--" not in proposal.proposed_filename
+
+
+def test_leading_and_trailing_punctuation_leaves_no_stray_hyphen() -> None:
+    proposal = build_filename_proposal(_extraction(product_summary="& Foo &"))
+
+    assert "_Foo_" in proposal.proposed_filename
+
+
 def test_non_german_accents_are_stripped_to_ascii() -> None:
     proposal = build_filename_proposal(_extraction(seller="Café Français"))
 

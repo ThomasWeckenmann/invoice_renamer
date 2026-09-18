@@ -28,8 +28,12 @@ _GERMAN_TRANSLITERATIONS = {
     "Ü": "Ue",
 }
 
-_FORBIDDEN_CHARS_RE = re.compile(r'[\/:*?"<>|\x00-\x1f]')
+# Whitelist rather than a forbidden-char blocklist: the model is prompted to
+# avoid punctuation but can't be relied on to comply, so filename-safety is
+# enforced deterministically here instead.
+_ALLOWED_CHARS_RE = re.compile(r"[^A-Za-z0-9_-]")
 _WHITESPACE_RE = re.compile(r"\s+")
+_MULTI_DASH_RE = re.compile(r"-{2,}")
 
 
 def _transliterate_german(text: str) -> str:
@@ -49,8 +53,9 @@ def _normalize_segment(text: str | None) -> tuple[str, bool]:
         return _MISSING_SEGMENT, True
 
     normalized = _to_ascii(_transliterate_german(text))
-    normalized = _FORBIDDEN_CHARS_RE.sub("", normalized)
     normalized = _WHITESPACE_RE.sub("-", normalized.strip())
+    normalized = _ALLOWED_CHARS_RE.sub("", normalized)
+    normalized = _MULTI_DASH_RE.sub("-", normalized).strip("-")
     return (normalized, False) if normalized else (_MISSING_SEGMENT, True)
 
 

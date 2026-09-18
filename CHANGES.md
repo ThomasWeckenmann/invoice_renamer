@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 0.17.1 (2026-09-18, claude sonnet-5)
+
+- bugfix: strip punctuation from filename segments deterministically instead of trusting model output
+
+  Seller/product segments only blocked OS-illegal characters, so periods,
+  commas, ampersands, and parens from model output survived into proposed
+  filenames. _normalize_segment now keeps only letters, digits, hyphens, and
+  underscores, collapsing any resulting double hyphens.
+
 ## Version 0.17.0 (2026-09-18, claude sonnet-5)
 
 - Show run metrics (timings, model, pages, tokens) on each reviewed invoice
