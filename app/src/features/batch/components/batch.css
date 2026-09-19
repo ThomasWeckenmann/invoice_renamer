@@ -3,6 +3,9 @@
   flex-direction: column;
   gap: 16px;
   padding: 24px 20px;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .batch-section {
@@ -10,6 +13,13 @@
   border: 1px solid var(--hairline);
   border-radius: 10px;
   padding: 18px 20px;
+}
+
+.batch-section--invoices {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .batch-section h2 {
@@ -91,19 +101,6 @@
 .import-dropzone--active {
   border-color: var(--accent);
   background: var(--accent-tint);
-}
-
-.import-dropzone__glyph {
-  width: 26px;
-  height: 26px;
-  flex-shrink: 0;
-  border-radius: 6px;
-  border: 1px solid var(--hairline-2);
-  background: var(--surface);
-  display: grid;
-  place-items: center;
-  color: var(--ink-50);
-  font-size: 13px;
 }
 
 .import-dropzone__label {
@@ -550,8 +547,15 @@
 .batch-workspace__toolbar {
   display: flex;
   flex-direction: column;
+  flex: none;
   gap: 10px;
   margin-bottom: 12px;
+}
+
+.batch-workspace__list-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .batch-workspace__toolbar-row {
@@ -608,19 +612,54 @@
   color: var(--ink-50);
 }
 
-.batch-workspace__option {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12.5px;
-  color: var(--ink-50);
+.batch-workspace__toggle {
+  position: relative;
+  cursor: pointer;
+}
+
+.batch-workspace__toggle-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
   white-space: nowrap;
+  border: 0;
+}
+
+.batch-workspace__toggle:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.batch-workspace__toggle-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ink-35);
+}
+
+.batch-workspace__toggle--on {
+  background: var(--accent-tint);
+  border-color: oklch(0.85 0.03 185);
+  color: var(--accent);
+}
+
+.batch-workspace__toggle--on:hover {
+  background: var(--accent-tint);
+}
+
+.batch-workspace__toggle--on .batch-workspace__toggle-dot {
+  background: var(--accent);
 }
 
 .batch-workspace__commit {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  flex: none;
   gap: 8px;
   margin-top: 16px;
   padding-top: 14px;

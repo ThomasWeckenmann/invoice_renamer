@@ -63,11 +63,8 @@ export function ImportDropzone({ onFilesImported, onImportError }: ImportDropzon
 
   return (
     <div className={`import-dropzone${isDragOver ? " import-dropzone--active" : ""}`}>
-      <span className="import-dropzone__glyph" aria-hidden="true">
-        +
-      </span>
       <p className="import-dropzone__label">
-        <strong>Drag PDF invoices here</strong>, or
+        <strong>Drag PDF invoices here</strong>
       </p>
       <span className="import-dropzone__spacer" />
       <button type="button" className="btn sm" onClick={handleBrowse}>

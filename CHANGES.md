@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 0.30.0 (2026-09-19, claude sonnet-5)
+
+- Keep the toolbar and commit bar pinned while the invoice list scrolls independently
+
+  Also: removed the leftover '+' glyph, turned 'Shorten seller + product
+  names' into a 'Shorten Names' toggle button, trimmed the drag-drop
+  label to 'Drag PDF invoices here', and auto-select Qwen when it's
+  already installed.
+
 ## Version 0.29.0 (2026-09-19, claude sonnet-5)
 
 - Default to compact view and add a 'Warnings/errors only' filter button

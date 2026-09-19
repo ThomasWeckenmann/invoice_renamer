@@ -1,7 +1,7 @@
 /** Top-level batch workspace: import, model selection, progress, review,
  * approval, and the final rename-and-Undo transaction. */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import "./batch.css";
 import { itemHasIssue } from "../types";
 import { useBatchWorkspace } from "../useBatchWorkspace";
@@ -23,6 +23,21 @@ export function BatchWorkspace() {
   const catalog = useModelCatalog();
   const batch = useBatchWorkspace();
   const rename = useRenameTransaction();
+
+  // Qwen is the default pick when it's already installed, so a returning
+  // user doesn't have to reselect a model every launch.
+  useEffect(() => {
+    if (selectedModelId !== null) {
+      return;
+    }
+    const qwen = catalog.models.find(
+      (model) =>
+        model.entry.id.toLowerCase().includes("qwen") && model.status === "installed" && model.compatible,
+    );
+    if (qwen) {
+      setSelectedModelId(qwen.entry.id);
+    }
+  }, [catalog.models, selectedModelId]);
 
   const selectedModel = catalog.models.find((model) => model.entry.id === selectedModelId);
   const canAnalyzeItem = selectedModel?.status === "installed";
@@ -79,7 +94,7 @@ export function BatchWorkspace() {
         />
       </section>
 
-      <section className="batch-section">
+      <section className="batch-section batch-section--invoices">
         <div className="batch-workspace__toolbar">
           <div className="batch-workspace__toolbar-row">
             <h2>Invoices ({batch.items.length})</h2>
@@ -100,13 +115,19 @@ export function BatchWorkspace() {
               >
                 {issuesOnly ? "Show all" : `Warnings/errors only (${issueCount})`}
               </button>
-              <label className="batch-workspace__option">
+              <label
+                className={`btn batch-workspace__toggle${
+                  shortenFields ? " batch-workspace__toggle--on" : ""
+                }`}
+              >
                 <input
                   type="checkbox"
+                  className="batch-workspace__toggle-input"
                   checked={shortenFields}
                   onChange={(event) => setShortenFields(event.target.checked)}
                 />
-                Shorten seller + product names
+                <span className="batch-workspace__toggle-dot" aria-hidden="true" />
+                Shorten Names
               </label>
               <button type="button" className="btn ok" disabled={!canAnalyzeAll} onClick={handleAnalyze}>
                 Analyze {batch.pendingCount > 0 ? `(${batch.pendingCount})` : ""}
@@ -127,21 +148,23 @@ export function BatchWorkspace() {
           <BatchProgressBar items={batch.items} />
         </div>
 
-        <BatchList
-          items={visibleItems}
-          renameOutcomes={rename.outcomes}
-          compact={compactView}
-          emptyMessage={
-            issuesOnly ? "No items with warnings or failures." : "No invoices imported yet."
-          }
-          onEditFilename={batch.editFilename}
-          onApprove={batch.approveItem}
-          onUnapprove={batch.unapproveItem}
-          onCancel={batch.cancelItem}
-          onAnalyze={handleAnalyzeItem}
-          canAnalyze={canAnalyzeItem}
-          onRemove={batch.removeItem}
-        />
+        <div className="batch-workspace__list-scroll">
+          <BatchList
+            items={visibleItems}
+            renameOutcomes={rename.outcomes}
+            compact={compactView}
+            emptyMessage={
+              issuesOnly ? "No items with warnings or failures." : "No invoices imported yet."
+            }
+            onEditFilename={batch.editFilename}
+            onApprove={batch.approveItem}
+            onUnapprove={batch.unapproveItem}
+            onCancel={batch.cancelItem}
+            onAnalyze={handleAnalyzeItem}
+            canAnalyze={canAnalyzeItem}
+            onRemove={batch.removeItem}
+          />
+        </div>
 
         <div className="batch-workspace__commit">
           <button
