@@ -80,6 +80,10 @@ def main() -> None:
         FIXTURES_DIR / "scanned_invoice.pdf",
         ["Invoice #2002", "Seller: Acme Corp", "Total: 450.00 EUR"],
     )
+    _scanned_page_pdf(
+        FIXTURES_DIR / "scanned_invoice_de.pdf",
+        ["Rechnung Nr. 3003", "Verkaeufer: Mueller GmbH", "Betrag: 199,00 EUR"],
+    )
 
     mixed_text_page = FIXTURES_DIR / "_mixed_text_page.pdf"
     _text_page_pdf(mixed_text_page, ["Page one has plenty of real invoice text here."])

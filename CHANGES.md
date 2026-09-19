@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 0.23.0 (2026-09-19, claude sonnet-5)
+
+- Recognize scanned invoices on macOS with the built-in Vision framework instead of Tesseract
+
+  macOS (dev or packaged) now uses Apple's Vision framework for OCR instead
+  of Tesseract, needing no Homebrew or OCR package install; Linux is
+  unchanged. Verified on macOS: English and German OCR both work in dev and
+  in the packaged app, with required third-party license notices bundled.
+
 ## Version 0.22.1 (2026-09-19, claude sonnet-5)
 
 - bugfix: resolve the worker executable directly instead of the removed externalBin sidecar API

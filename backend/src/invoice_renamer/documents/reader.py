@@ -9,7 +9,7 @@ from pypdf._page import PageObject
 from pypdf.errors import PyPdfError
 
 from invoice_renamer.documents.models import NormalizedDocument, PageText
-from invoice_renamer.documents.ocr import OcrEngine, TesseractOcrEngine
+from invoice_renamer.documents.ocr import OcrEngine, default_ocr_engine
 from invoice_renamer.documents.render import render_page_to_image
 
 # Below this many non-whitespace characters, a page's extracted text is
@@ -40,7 +40,7 @@ def read_document(pdf_bytes: bytes, *, ocr_engine: OcrEngine | None = None) -> N
     if page_count > _MAX_PAGES:
         raise ValueError(f"PDF has too many pages (> {_MAX_PAGES})")
 
-    ocr_engine = ocr_engine or TesseractOcrEngine()
+    ocr_engine = ocr_engine or default_ocr_engine()
     pages = [
         _read_page(index, page, pdf_bytes, ocr_engine) for index, page in enumerate(reader.pages)
     ]

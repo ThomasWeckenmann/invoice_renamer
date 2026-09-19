@@ -13,9 +13,10 @@ This project isn't distributed as a built app — build it yourself from source 
 - **Rust**, via [rustup](https://rustup.rs), plus the Tauri CLI: `cargo install tauri-cli --version "^2.0.0" --locked`
 - **Node.js** 20.19+ or 22.12+ (Vite 7's requirement) and npm
 - **Python 3.12** and [uv](https://docs.astral.sh/uv/)
-- **Tesseract OCR**, with English and German language data:
-  - macOS: `brew install tesseract tesseract-lang`
-  - Debian/Ubuntu: `sudo apt install tesseract-ocr tesseract-ocr-deu`
+- **Linux only** — Tesseract OCR, with English and German language data:
+  `sudo apt install tesseract-ocr tesseract-ocr-deu`. macOS needs no OCR
+  package at all - scanned invoices are recognized through the OS's own
+  Vision framework.
 - **Linux only** — Tauri's native webview dependencies:
   ```
   sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file \

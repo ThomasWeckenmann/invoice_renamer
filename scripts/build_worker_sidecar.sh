@@ -40,7 +40,14 @@ echo "Building $sidecar_name for $target_triple with PyInstaller ($mode)..."
     --distpath "$build_root/dist" \
     --workpath "$build_root/build" \
     --specpath "$build_root" \
+    --add-data "$backend_dir/THIRD-PARTY-LICENSES:." \
     packaging/worker_entrypoint.py
+  # --add-data's source must be absolute: a relative one resolves against
+  # --specpath, not this subshell's cwd - confirmed by a throwaway build,
+  # since PyInstaller's own docs don't spell this out. Its destination "."
+  # lands inside onedir's _internal/ (PyInstaller's modern layout keeps only
+  # the executable at the top level), so the license file ships at
+  # <worker dir>/_internal/THIRD-PARTY-LICENSES, not beside the executable.
 )
 
 if [ "$mode" = "onefile" ]; then

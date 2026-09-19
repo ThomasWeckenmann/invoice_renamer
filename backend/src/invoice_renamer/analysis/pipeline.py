@@ -6,7 +6,7 @@ import time
 
 from PIL import Image
 
-from invoice_renamer.documents.ocr import OcrEngine, OcrResult, TesseractOcrEngine
+from invoice_renamer.documents.ocr import OcrEngine, OcrResult, default_ocr_engine
 from invoice_renamer.documents.reader import read_document
 from invoice_renamer.inference.extractor import extract_invoice
 from invoice_renamer.inference.language_model import LanguageModel
@@ -38,7 +38,7 @@ def run_document_analysis(
     model_id: str,
     model_revision: str | None,
 ) -> tuple[FilenameProposal, RunMetrics]:
-    ocr_engine = _TimingOcrEngine(TesseractOcrEngine())
+    ocr_engine = _TimingOcrEngine(default_ocr_engine())
 
     read_start = time.perf_counter()
     document = read_document(pdf_bytes, ocr_engine=ocr_engine)
