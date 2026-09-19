@@ -640,4 +640,34 @@ mod tests {
         assert!(result.is_err(), "expected Err, got {result:?}");
         fs::remove_dir_all(&dir).ok();
     }
+
+    /// A staged worker that exists but lost its executable bit (a stripped
+    /// archive, a botched `ditto`/codesign step, a filesystem that doesn't
+    /// preserve permissions) must fail the same clear way as a missing one -
+    /// not hang, and not have the OS fall back to some other same-named
+    /// executable on PATH, since the resolved path always contains a `/` and
+    /// so is never subject to a PATH search in the first place.
+    #[tokio::test]
+    async fn spawning_a_non_executable_resolved_path_is_an_error() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = unique_temp_dir("non-executable-spawn");
+        let staged = dir.join(SIDECAR_NAME);
+        fs::write(&staged, b"#!/bin/sh\necho should never run\n")
+            .expect("write fake staged executable");
+        fs::set_permissions(&staged, fs::Permissions::from_mode(0o644))
+            .expect("strip the executable bit");
+
+        let mut std_command = StdCommand::new(&staged);
+        std_command
+            .stdout(Stdio::piped())
+            .stdin(Stdio::piped())
+            .stderr(Stdio::piped());
+        detach_into_own_process_group(&mut std_command);
+
+        let result = TokioCommand::from(std_command).spawn();
+
+        assert!(result.is_err(), "expected Err, got {result:?}");
+        fs::remove_dir_all(&dir).ok();
+    }
 }

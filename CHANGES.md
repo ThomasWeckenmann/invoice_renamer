@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 0.23.1 (2026-09-19, claude sonnet-5)
+
+- bugfix: sign the packaged macOS app after inserting the worker, instead of skipping signing entirely
+
+  build_macos_app.sh only re-signed when the app already had a prior seal,
+  but Tauri never signs the bundle when no signingIdentity is configured, so
+  that check was always false and the shipped app carried none - failing
+  Gatekeeper's first launch with an unbypassable 'app is damaged' error.
+
 ## Version 0.23.0 (2026-09-19, claude sonnet-5)
 
 - Recognize scanned invoices on macOS with the built-in Vision framework instead of Tesseract

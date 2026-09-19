@@ -51,13 +51,26 @@ if [ ! -d "$app_path" ]; then
   exit 1
 fi
 
-# Whether the bundle carries a signature seal decides if inserting files
-# invalidates it. Tauri only seals the bundle when a signing identity is
-# configured, so on an unsigned build there is nothing to preserve - but the
-# moment one is configured, the worker has to go in before the seal is made.
-bundle_was_sealed=false
-if [ -e "$app_path/Contents/_CodeSignature/CodeResources" ]; then
-  bundle_was_sealed=true
+# Whether the app already carries a signature from a real (non ad hoc)
+# identity, decided before the worker goes in. This is not the same question
+# as whether Tauri sealed the bundle at all: confirmed on real hardware that
+# Tauri does not sign the .app when no signingIdentity is configured (only
+# the linker's own automatic per-executable ad hoc signature exists, with no
+# Contents/_CodeSignature/CodeResources at all) - a prior version of this
+# script treated that as "nothing to preserve, skip signing entirely",
+# leaving the worker-inserted app with no bundle-level seal whatsoever. That
+# is not a cosmetic gap: reproduced on real hardware, a genuinely quarantined
+# copy of that app fails Gatekeeper's first-launch check with "is damaged and
+# should be moved to the Trash" - unlike an ad hoc signature, which gets the
+# bypassable "unidentified developer" prompt this project's README documents.
+# The fix is to always (re)sign after inserting the worker; what this check
+# still guards is not silently downgrading an app actually signed with a real
+# identity down to ad hoc just because that identity isn't available in this
+# invocation.
+existing_team="$(codesign -dv "$app_path" 2>&1 | sed -n 's/^TeamIdentifier=//p')"
+had_real_identity=false
+if [ -n "$existing_team" ] && [ "$existing_team" != "not set" ]; then
+  had_real_identity=true
 fi
 
 dest_worker="$app_path/Contents/Resources/worker"
@@ -101,47 +114,49 @@ if [ "$failed" = true ]; then
 fi
 echo "  $dest_entries entries, $source_links symlinks preserved, none dangling"
 
-if [ "$bundle_was_sealed" = true ]; then
-  identity="${APPLE_SIGNING_IDENTITY:-$(python3 -c "
+identity="${APPLE_SIGNING_IDENTITY:-$(python3 -c "
 import json
 conf = json.load(open('$tauri_conf'))
 print(conf.get('bundle', {}).get('macOS', {}).get('signingIdentity') or '')
 ")}"
-  if [ -z "$identity" ] && codesign -dv "$app_path" 2>&1 | grep -q "Signature=adhoc"; then
-    identity="-"
-  fi
-  if [ -z "$identity" ]; then
-    echo "error: the app was signed before the worker went in, so its seal is now stale, and no identity is available to re-sign with. Set APPLE_SIGNING_IDENTITY and re-run." >&2
+if [ -z "$identity" ]; then
+  if [ "$had_real_identity" = true ]; then
+    echo "error: the app was signed with a real identity before the worker went in, but none is available now to re-sign with (checked \$APPLE_SIGNING_IDENTITY and tauri.conf.json's bundle.macOS.signingIdentity). Set APPLE_SIGNING_IDENTITY and re-run rather than silently downgrading to an ad hoc signature." >&2
     exit 1
   fi
+  # No real identity is configured, and none was used to build this app
+  # either - ad hoc is the correct default for this project (self-built, not
+  # distributed or notarized - see README), and matches what the bundle's
+  # own executable already carries.
+  identity="-"
+fi
 
-  # Read back the same two settings Tauri itself passes to codesign when it
-  # first sealed the app, so a plain --force --sign does not quietly drop
-  # them: an app that loses its entitlements or hardened runtime can behave
-  # differently or fail notarization despite verifying as signed.
-  entitlements_path="$(python3 -c "
+# Read back the same two settings Tauri itself passes to codesign when it
+# signs the app with a real identity, so a plain --force --sign does not
+# quietly drop them: an app that loses its entitlements or hardened runtime
+# can behave differently or fail notarization despite verifying as signed.
+entitlements_path="$(python3 -c "
 import json
 conf = json.load(open('$tauri_conf'))
 ent = conf.get('bundle', {}).get('macOS', {}).get('entitlements')
 print(ent if isinstance(ent, str) else '')
 ")"
-  hardened_runtime="$(python3 -c "
+hardened_runtime="$(python3 -c "
 import json
 conf = json.load(open('$tauri_conf'))
 print('1' if conf.get('bundle', {}).get('macOS', {}).get('hardenedRuntime') else '')
 ")"
 
-  codesign_args=(--force --sign "$identity")
-  if [ -n "$entitlements_path" ]; then
-    codesign_args+=(--entitlements "$repo_root/src-tauri/$entitlements_path")
-  fi
-  if [ -n "$hardened_runtime" ]; then
-    codesign_args+=(--options runtime)
-  fi
-
-  echo "Re-sealing the app, whose signature the insertion invalidated..."
-  codesign "${codesign_args[@]}" "$app_path"
-  codesign --verify --strict "$app_path"
+codesign_args=(--force --sign "$identity")
+if [ -n "$entitlements_path" ]; then
+  codesign_args+=(--entitlements "$repo_root/src-tauri/$entitlements_path")
 fi
+if [ -n "$hardened_runtime" ]; then
+  codesign_args+=(--options runtime)
+fi
+
+echo "Sealing the app now that the worker is inserted..."
+codesign "${codesign_args[@]}" "$app_path"
+codesign --verify --strict "$app_path"
 
 echo "Built $app_path"

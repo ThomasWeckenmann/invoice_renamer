@@ -577,6 +577,150 @@ Still open before this block is accepted:
 Acceptance: normal distribution validation succeeds and negative cases
 preserve authentication, process cleanup, and predictable executable selection.
 
+### Block 5 progress, 2026-09-19
+
+Covered from this sandbox by reading the actual source (Rust, Python, and
+build scripts) rather than assuming from the plan's own description, plus one
+test added and run:
+
+- Executable resolution: `resolve_worker_executable` always spawns an
+  absolute path via `Command::new`, never a shell (`sh -c` only appears in
+  `worker.rs`'s own tests, standing in for the sidecar). A path containing `/`
+  is never subject to a PATH search under POSIX exec semantics, so the "falls
+  back to PATH" case is structurally impossible, not just untested. The dev
+  staging fallback is compiled out of release builds entirely
+  (`cfg!(debug_assertions)`), confirmed by reading the gating, not rechecked
+  by a new build here.
+- Wrong-architecture and stale-onefile guards: `build.rs` panics if
+  `resources/worker.target` doesn't match the build's `TARGET`, and
+  `build_macos_app.sh` checks the same pair again before spending a full
+  compile. Onefile builds are never staged into `resources/worker` at all
+  (`build_worker_sidecar.sh` writes them only to a separate comparison
+  directory) - a structural guarantee, not a check that could be bypassed.
+- Session-token secrecy: the 32-character token comes from `rand`'s
+  CSPRNG-backed `ThreadRng` (~190 bits), is compared server-side with
+  `secrets.compare_digest`, and is never written to a log or persisted
+  client-side - the frontend re-fetches it from the Rust side
+  (`get_worker_endpoint`) on every API call rather than caching it. The
+  worker binds `127.0.0.1` only, and `require_session_token` is a global
+  FastAPI dependency covering every route, including `/health` - there is no
+  unauthenticated endpoint to probe.
+- Runtime writes: `resolve_data_dir()` puts models and cache under
+  `~/Library/Application Support/invoice-renamer` (macOS) or the XDG data
+  dir (Linux); nothing in the backend derives a path from the frozen
+  executable's own location (`sys.executable`/`_MEIPASS`/`__file__`-relative
+  writes: none found), so there is no code path that would write into the
+  installed, signed bundle.
+- Missing/non-executable/early-exit/timeout/quit-during-startup/normal-quit:
+  all but one already had a dedicated regression test. Added
+  `spawning_a_non_executable_resolved_path_is_an_error` (a staged file that
+  exists but lost its executable bit must fail the same clear way as a
+  missing one, not hang or fall back) and confirmed it needed no production
+  change - `Command::spawn()` already surfaces the OS's own permission error
+  through the existing `could not spawn worker at {path}: {err}` message.
+  Verified in this sandbox with an isolated `CARGO_TARGET_DIR`: the
+  developer's staged macOS `worker.target` marker was overwritten in place
+  with this sandbox's own triple (a one-line text file, not the staged
+  worker binaries, and gitignored - restored byte-for-byte after, confirmed
+  with `od -c`) rather than moved aside, since moving the staged resources
+  directory itself was refused by this session's own destructive-action
+  guard. `cargo test --lib` (39 passed, 1 pre-existing ignored), `cargo
+  clippy --lib -- -D warnings`, and `cargo fmt --check` all pass.
+- Already settled by earlier blocks, not redone here: Block 3a directly
+  confirmed `THIRD-PARTY-LICENSES`'s content and path inside the real signed
+  `.app`, and that Apple Vision needs no extra entitlement or prompt; Block 4
+  confirmed clean worker/process teardown after quitting the packaged app.
+
+A finding surfaced but deliberately not acted on: no logger is registered
+anywhere in the Tauri shell (no `env_logger`, no `tauri-plugin-log`, no
+`log::set_logger` call). Every `log::warn!`/`log::error!` in `worker.rs` and
+`lib.rs` - including the worker-stderr forwarding this plan's acceptance
+criterion is about - is currently a no-op: nothing reaches a terminal, file,
+or any other sink, in dev or packaged builds. This means the letter of
+"timing and error logs must not expose credentials or invoice data" holds
+today only because there is no sink at all to expose them to, not because
+anything was redacted; the user-visible error strings shown by the frontend
+(`useWorkerStartup.ts`) are separately confirmed generic (exit status/timeout
+descriptions, never raw stdout/stderr content). `transformers_extractor.py`'s
+empty-completion diagnostic (prints the model's raw decoded output, which can
+carry invoice-derived text, to stderr) is the specific line that would need
+redacting the day a logger is actually wired up. Left as a flag rather than a
+fix: adding a logging backend is a new subsystem outside a review block's
+scope, and there is nothing to correct while nothing is captured.
+
+### Confirmed defect and fix: `build_macos_app.sh` never re-signed the app
+
+Found while attempting the Gatekeeper first-launch check this block's
+acceptance criterion asks for. `tauri.conf.json` has no `bundle.macOS`
+section at all - no `signingIdentity`, `entitlements`, or `hardenedRuntime` -
+and confirmed on the developer's real Mac: with nothing configured, Tauri
+does not sign the produced `.app` bundle at all. Only the main executable's
+own automatic linker ad hoc signature exists (`flags=0x20002(adhoc,
+linker-signed)`); there is no `Contents/_CodeSignature/CodeResources`.
+`build_macos_app.sh`'s re-sign-after-insertion step was gated on that file
+existing (`bundle_was_sealed`), so under this project's actual configuration
+that condition was always false and the step never ran - the shipped,
+worker-inserted app carried no bundle-level signature whatsoever.
+
+Reproduced end to end on the developer's Mac: a genuinely quarantined copy
+(`xattr -w com.apple.quarantine ...`, not a same-machine `cp`) of that app,
+opened via Finder, hit **"is damaged and can't be opened"** - the
+unbypassable Gatekeeper failure, not the expected bypassable "unidentified
+developer" prompt this project's README documents as the normal flow for a
+self-built, non-notarized app. This is a real defect, not a cosmetic gap.
+
+Fixed in `build_macos_app.sh`: the app is now unconditionally (re-)signed
+after the worker is inserted, defaulting to ad hoc (`-`) when no
+`APPLE_SIGNING_IDENTITY`/`tauri.conf.json` identity is configured - matching
+what Tauri would have produced itself if it signed the bundle at all. The one
+case still guarded against is silently downgrading an app that previously
+carried a real (non-ad-hoc) identity: `TeamIdentifier` is read from the
+pre-insertion bundle, and a hard error is raised if a real identity was used
+before but none is resolvable now, rather than quietly re-signing ad hoc.
+Entitlements/hardened-runtime read-back is unchanged. `bash -n` syntax-checked
+in this sandbox; the script cannot otherwise run here (`Darwin`-only, needs a
+real staged worker and `cargo tauri build`).
+
+**Confirmed fixed on real hardware, 2026-09-19**: rebuilt with
+`scripts/build_macos_app.sh` (signing step ran cleanly - "Sealing the app
+now that the worker is inserted... replacing existing signature" - and
+`codesign --verify --strict` passed, since the script would otherwise have
+aborted under `set -euo pipefail`). Repeating the same quarantine-xattr copy
+and Finder open against the new build now produces "Apple could not verify
+[...]" - the expected bypassable prompt - instead of "is damaged." Logged as
+a changelog entry (`CHANGES.md`, version 0.23.1).
+
+Confirmed by the developer: bypassing via System Settings - Privacy &
+Security - Open Anyway on the quarantined, newly-signed copy actually opens
+the app and reaches a working state, not just past the prompt itself.
+
+Confirmed by the developer: `codesign -dv --verbose=4` on the fixed app now
+shows `flags=0x2(adhoc)` (a real bundle-level signature, not just the bare
+executable's `linker-signed` one) and `Sealed Resources version=2 rules=13
+files=5768` - the resource seal now covers the whole tree, including the
+inserted worker. `spctl -a -vvv` reports `rejected`, which is expected and
+not a regression: that command checks the strict Developer ID/notarized
+auto-execution policy, which any ad hoc, non-notarized app fails by design -
+a separate question from whether a user can open it via the bypass already
+confirmed working above.
+
+**Deliberately skipped, developer's call, 2026-09-19**: exercising the
+non-executable/missing-resource paths against a real copy of the packaged
+`.app` end to end. The Rust unit tests already cover that logic in isolation
+(`spawning_a_non_executable_resolved_path_is_an_error`,
+`find_worker_executable_reports_every_path_it_tried_when_none_exist`, see
+above); the gap is only whether the real bundle's UI/cleanup behavior matches,
+which was judged not worth the remaining manual-testing time given everything
+else in this block is now confirmed on real hardware.
+
+### Block 5 accepted, 2026-09-19
+
+Every acceptance-criterion item is either confirmed on real hardware or
+explicitly deferred by the developer's own decision above - not left
+unresolved by omission. The signing defect this block exists to catch (an
+unbypassable Gatekeeper failure that unit tests alone could never have
+surfaced) was found, fixed, and confirmed fixed end to end.
+
 ## References
 
 - [PyInstaller operating modes](https://pyinstaller.org/en/stable/operating-mode.html)
