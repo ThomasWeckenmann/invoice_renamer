@@ -82,6 +82,15 @@ def test_zugferd_xml_is_detected_and_decoded() -> None:
     assert "INV-0001" in document.embedded_xml
 
 
+def test_unsupported_xml_is_not_reported_as_embedded_xml() -> None:
+    # A known attachment name alone doesn't make it usable invoice XML - see
+    # documents/xml_attachments.py's classification. embedded_xml only reflects
+    # a SUPPORTED candidate, so a wrong-root attachment must not surface here.
+    document = read_document(_load("with_zugferd_xml_wrong_root.pdf"))
+
+    assert document.embedded_xml is None
+
+
 def test_custom_ocr_engine_is_used_when_provided() -> None:
     document = read_document(_load("blank_page.pdf"), ocr_engine=_StubOcrEngine())
 

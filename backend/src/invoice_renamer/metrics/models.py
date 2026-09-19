@@ -1,8 +1,14 @@
 """Pydantic contract for per-run timing and execution metrics."""
 
 import math
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+# Kept in sync by hand with extraction_router.ExtractionSource and
+# xml_attachments.XmlDiscoveryStatus - see those modules for what each value means.
+ExtractionSourceValue = Literal["xml", "xml_and_model", "model"]
+XmlStatusValue = Literal["none", "supported", "unsupported", "invalid", "ambiguous"]
 
 
 class RunMetrics(BaseModel):
@@ -10,6 +16,9 @@ class RunMetrics(BaseModel):
     pdf_extraction_ms: int
     ocr_ms: int
     inference_ms: int
+    # XML discovery/parsing time, already included in total_ms; 0 (its default)
+    # for runs from before this field existed, since no XML routing ran then.
+    xml_ms: int = 0
     model_id: str
     provider: str
     model_revision: str | None = None
@@ -19,8 +28,17 @@ class RunMetrics(BaseModel):
     output_tokens: int | None = None
     tokens_per_second: float | None = None
     warnings: list[str] = Field(default_factory=list)
+    # Defaults describe a pre-XML-routing run: model-only, no XML ever detected,
+    # inference ran to produce the result - never mark historical metrics as
+    # having used XML they never had a chance to see.
+    extraction_source: ExtractionSourceValue = "model"
+    xml_status: XmlStatusValue = "none"
+    xml_attachment_name: str | None = None
+    xml_profile_id: str | None = None
+    xml_fields_used: list[str] = Field(default_factory=list)
+    inference_ran: bool = True
 
-    @field_validator("total_ms", "pdf_extraction_ms", "ocr_ms", "inference_ms")
+    @field_validator("total_ms", "pdf_extraction_ms", "ocr_ms", "inference_ms", "xml_ms")
     @classmethod
     def _validate_non_negative_ms(cls, value: int) -> int:
         if value < 0:

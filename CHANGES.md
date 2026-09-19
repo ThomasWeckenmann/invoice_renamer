@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 0.24.0 (2026-09-19, claude sonnet-5)
+
+- Use embedded ZUGFeRD/Factur-X invoice XML as the authoritative source for invoice fields
+
+  Supported CII/EN16931 XML now wins over model output field by field, skipping
+  OCR/model loading when complete; unsupported/malformed XML falls back
+  unchanged. Went through three rounds of manual-testing-driven hardening since -
+  see the plan's Block 6 for the full lists of gaps found and fixed.
+
 ## Version 0.23.1 (2026-09-19, claude sonnet-5)
 
 - bugfix: sign the packaged macOS app after inserting the worker, instead of skipping signing entirely

@@ -4,11 +4,38 @@
 import { invoke } from "@tauri-apps/api/core";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { RunMetrics } from "../../../lib/api/types";
 import type { RenameOutcome } from "../useRenameTransaction";
 import type { BatchItem } from "../types";
 import { BatchItemRow } from "./BatchItemRow";
 
 const mockedInvoke = vi.mocked(invoke);
+
+function runMetrics(overrides: Partial<RunMetrics> = {}): RunMetrics {
+  return {
+    total_ms: 800,
+    pdf_extraction_ms: 100,
+    ocr_ms: 0,
+    inference_ms: 700,
+    xml_ms: 0,
+    model_id: "qwen3-0.6b",
+    provider: "transformers",
+    model_revision: null,
+    pages_total: 1,
+    pages_ocr: [],
+    input_tokens: null,
+    output_tokens: null,
+    tokens_per_second: null,
+    warnings: [],
+    extraction_source: "model",
+    xml_status: "none",
+    xml_attachment_name: null,
+    xml_profile_id: null,
+    xml_fields_used: [],
+    inference_ran: true,
+    ...overrides,
+  };
+}
 
 function reviewItem(overrides: Partial<BatchItem> = {}): BatchItem {
   return {
@@ -111,21 +138,19 @@ describe("BatchItemRow", () => {
       <ul>
         <BatchItemRow
           item={reviewItem({
-            metrics: {
+            metrics: runMetrics({
               total_ms: 4200,
               pdf_extraction_ms: 100,
               ocr_ms: 600,
               inference_ms: 3500,
               model_id: "granite-3.3-2b",
-              provider: "transformers",
               model_revision: "abc123",
               pages_total: 3,
               pages_ocr: [2],
               input_tokens: 512,
               output_tokens: 64,
               tokens_per_second: 12.5,
-              warnings: [],
-            },
+            }),
           })}
           onEditFilename={noop}
           onApprove={noop}
@@ -144,6 +169,7 @@ describe("BatchItemRow", () => {
     expect(screen.getByText("3.5 s")).toBeInTheDocument();
     expect(screen.getByText("3 (1 via OCR)")).toBeInTheDocument();
     expect(screen.getByText("512 in / 64 out (12.5 tok/s)")).toBeInTheDocument();
+    expect(screen.getByText("PDF text + AI (OCR)")).toBeInTheDocument();
   });
 
   it("omits the tokens row when no token counts are available", () => {
@@ -151,21 +177,7 @@ describe("BatchItemRow", () => {
       <ul>
         <BatchItemRow
           item={reviewItem({
-            metrics: {
-              total_ms: 800,
-              pdf_extraction_ms: 100,
-              ocr_ms: 0,
-              inference_ms: 700,
-              model_id: "qwen3-0.6b",
-              provider: "transformers",
-              model_revision: null,
-              pages_total: 1,
-              pages_ocr: [],
-              input_tokens: null,
-              output_tokens: null,
-              tokens_per_second: null,
-              warnings: [],
-            },
+            metrics: runMetrics(),
           })}
           onEditFilename={noop}
           onApprove={noop}
@@ -180,6 +192,109 @@ describe("BatchItemRow", () => {
 
     expect(screen.getByText("qwen3-0.6b")).toBeInTheDocument();
     expect(screen.queryByText("Tokens")).not.toBeInTheDocument();
+  });
+
+  it("shows the XML source and no model for a complete XML-only run", () => {
+    render(
+      <ul>
+        <BatchItemRow
+          item={reviewItem({
+            proposal: {
+              extraction: {
+                invoice_date: "2026-01-15",
+                seller: "Beispiel GmbH",
+                product_summary: "Cloud Hosting",
+                gross_total: "595.00",
+                currency: "EUR",
+                language: "unknown",
+                evidence: {
+                  invoice_date: { page: null, excerpt: null, xml_field: "ram:IssueDateTime" },
+                  seller: { page: null, excerpt: null, xml_field: "ram:SellerTradeParty/ram:Name" },
+                },
+                warnings: [],
+              },
+              proposed_filename: "2026-01-15_Beispiel-GmbH_Cloud-Hosting_595-EUR.pdf",
+              requires_review: false,
+              missing_fields: [],
+            },
+            metrics: runMetrics({
+              total_ms: 5,
+              pdf_extraction_ms: 0,
+              inference_ms: 0,
+              xml_ms: 5,
+              extraction_source: "xml",
+              xml_status: "supported",
+              xml_attachment_name: "factur-x.xml",
+              xml_profile_id: "urn:cen.eu:en16931:2017",
+              xml_fields_used: ["invoice_date", "seller", "product_summary", "gross_total", "currency"],
+              inference_ran: false,
+            }),
+          })}
+          onEditFilename={noop}
+          onApprove={noop}
+          onUnapprove={noop}
+          onCancel={noop}
+          onAnalyze={noop}
+          canAnalyze={true}
+          onRemove={noop}
+        />
+      </ul>,
+    );
+
+    expect(screen.getByText("ZUGFeRD / Factur-X XML")).toBeInTheDocument();
+    expect(screen.getByText("Not used")).toBeInTheDocument();
+    expect(screen.getByText("Detected and used (5 of 5 fields)")).toBeInTheDocument();
+    // Field-provenance badges only, on Date and Seller (the two fields with XML evidence).
+    expect(screen.getAllByTitle("From embedded invoice XML")).toHaveLength(2);
+  });
+
+  it("explains a detected but unsupported XML profile in Run details", () => {
+    render(
+      <ul>
+        <BatchItemRow
+          item={reviewItem({
+            metrics: runMetrics({
+              extraction_source: "model",
+              xml_status: "unsupported",
+              xml_attachment_name: "factur-x.xml",
+              xml_profile_id: "urn:factur-x.eu:1p0:minimum",
+            }),
+          })}
+          onEditFilename={noop}
+          onApprove={noop}
+          onUnapprove={noop}
+          onCancel={noop}
+          onAnalyze={noop}
+          canAnalyze={true}
+          onRemove={noop}
+        />
+      </ul>,
+    );
+
+    expect(
+      screen.getByText(
+        "Detected but uses an unsupported invoice profile (urn:factur-x.eu:1p0:minimum); used AI instead",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("omits the XML row entirely when no XML was ever detected", () => {
+    render(
+      <ul>
+        <BatchItemRow
+          item={reviewItem({ metrics: runMetrics() })}
+          onEditFilename={noop}
+          onApprove={noop}
+          onUnapprove={noop}
+          onCancel={noop}
+          onAnalyze={noop}
+          canAnalyze={true}
+          onRemove={noop}
+        />
+      </ul>,
+    );
+
+    expect(screen.queryByText("XML")).not.toBeInTheDocument();
   });
 });
 

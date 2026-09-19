@@ -670,3 +670,152 @@ def test_terminal_job_drops_its_pdf_bytes(
 
     coordinator: analyses_routes.AnalysisCoordinator = client.app.state.analysis_coordinator  # type: ignore[attr-defined]
     assert coordinator.get(submitted["id"]).pdf_bytes is None
+
+
+# --- Embedded ZUGFeRD/Factur-X XML: happy path end-to-end (plan Block 5) ---
+
+_XML_FIXTURE = (FIXTURES_DIR / "with_zugferd_xml.pdf").read_bytes()
+_XML_PARTIAL_FIXTURE = (FIXTURES_DIR / "with_zugferd_xml_partial.pdf").read_bytes()
+_XML_MALFORMED_FIXTURE = (FIXTURES_DIR / "with_zugferd_xml_malformed.pdf").read_bytes()
+
+
+def test_complete_xml_job_never_loads_a_model_and_reports_xml_as_the_source(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Full API happy path: with_zugferd_xml.pdf carries a complete, supported CII
+    invoice whose values (Beispiel GmbH / Cloud Hosting / 595.00 EUR / 2026-01-15)
+    deliberately differ from its own visible page text (Apple / MacBook Air /
+    2180.00 EUR) - proving the filename and evidence come from XML, not the page."""
+    entry = _entry(_MODEL_A)
+    _install(entry, tmp_path)
+    load_calls: list[str] = []
+    monkeypatch.setattr(
+        TransformersExtractor,
+        "load_installed",
+        lambda entry, data_dir, *, device: (
+            load_calls.append(entry.id) or _FakeExtractor(_VALID_MODEL_RESPONSE)
+        ),
+    )
+
+    submitted = _submit(client, _MODEL_A, _XML_FIXTURE)
+    completed = _poll_until(client, submitted["id"], terminal_statuses=("completed", "failed"))
+
+    assert completed["status"] == "completed"
+    proposal = completed["proposal"]
+    assert proposal["proposed_filename"] == "2026-01-15_Beispiel-GmbH_Cloud-Hosting_595-EUR.pdf"
+    assert proposal["requires_review"] is False
+    extraction = proposal["extraction"]
+    assert extraction["seller"] == "Beispiel GmbH"
+    assert extraction["product_summary"] == "Cloud Hosting"
+    for field_name in ("invoice_date", "seller", "product_summary", "gross_total", "currency"):
+        assert extraction["evidence"][field_name]["xml_field"] is not None
+        assert extraction["evidence"][field_name]["page"] is None
+
+    metrics = completed["metrics"]
+    assert metrics["extraction_source"] == "xml"
+    assert metrics["xml_status"] == "supported"
+    assert metrics["xml_attachment_name"] == "factur-x.xml"
+    assert metrics["inference_ran"] is False
+    assert metrics["ocr_ms"] == 0
+    assert metrics["inference_ms"] == 0
+    assert metrics["pages_ocr"] == []
+    assert load_calls == []  # the model was never loaded for this job
+
+
+def test_partial_xml_job_merges_model_fallback_without_overwriting_xml_fields(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry = _entry(_MODEL_A)
+    _install(entry, tmp_path)
+    # Scripted to conflict with every field XML *does* supply, and to supply the
+    # one XML leaves empty (seller) - only the seller should come from this.
+    conflicting_response = json.dumps(
+        {
+            "invoice_date": "1999-01-01",
+            "seller": "Model Seller",
+            "product_summary": "Wrong Product",
+            "gross_total": "1.00",
+            "currency": "USD",
+            "language": "en",
+            "warnings": [],
+        }
+    )
+    monkeypatch.setattr(
+        TransformersExtractor,
+        "load_installed",
+        lambda entry, data_dir, *, device: _FakeExtractor(conflicting_response),
+    )
+
+    submitted = _submit(client, _MODEL_A, _XML_PARTIAL_FIXTURE)
+    completed = _poll_until(client, submitted["id"], terminal_statuses=("completed", "failed"))
+
+    extraction = completed["proposal"]["extraction"]
+    assert extraction["seller"] == "Model Seller"
+    assert extraction["invoice_date"] == "2026-01-15"
+    assert extraction["product_summary"] == "Cloud Hosting"
+    assert extraction["gross_total"] == "595.00"
+    assert extraction["currency"] == "EUR"
+    assert "seller" not in extraction["evidence"]
+    assert extraction["evidence"]["invoice_date"]["xml_field"] is not None
+
+    metrics = completed["metrics"]
+    assert metrics["extraction_source"] == "xml_and_model"
+    assert metrics["xml_status"] == "supported"
+    assert metrics["inference_ran"] is True
+    assert set(metrics["xml_fields_used"]) == {
+        "invoice_date",
+        "product_summary",
+        "gross_total",
+        "currency",
+    }
+
+
+def test_malformed_xml_job_falls_back_to_the_model_entirely(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry = _entry(_MODEL_A)
+    _install(entry, tmp_path)
+    monkeypatch.setattr(
+        TransformersExtractor,
+        "load_installed",
+        lambda entry, data_dir, *, device: _FakeExtractor(_VALID_MODEL_RESPONSE),
+    )
+
+    submitted = _submit(client, _MODEL_A, _XML_MALFORMED_FIXTURE)
+    completed = _poll_until(client, submitted["id"], terminal_statuses=("completed", "failed"))
+
+    assert completed["status"] == "completed"
+    assert completed["proposal"]["extraction"]["seller"] == "Apple"
+    metrics = completed["metrics"]
+    assert metrics["extraction_source"] == "model"
+    assert metrics["xml_status"] == "invalid"
+    assert metrics["inference_ran"] is True
+    assert any("not valid XML" in warning for warning in metrics["warnings"])
+
+
+def test_a_batch_can_mix_xml_only_and_model_based_jobs(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry = _entry(_MODEL_A)
+    _install(entry, tmp_path)
+    load_calls: list[str] = []
+    monkeypatch.setattr(
+        TransformersExtractor,
+        "load_installed",
+        lambda entry, data_dir, *, device: (
+            load_calls.append(entry.id) or _FakeExtractor(_VALID_MODEL_RESPONSE)
+        ),
+    )
+
+    xml_job = _submit(client, _MODEL_A, _XML_FIXTURE)
+    ordinary_job = _submit(client, _MODEL_A, _VALID_PDF)
+
+    xml_completed = _poll_until(client, xml_job["id"], terminal_statuses=("completed", "failed"))
+    ordinary_completed = _poll_until(
+        client, ordinary_job["id"], terminal_statuses=("completed", "failed")
+    )
+
+    assert xml_completed["metrics"]["extraction_source"] == "xml"
+    assert ordinary_completed["metrics"]["extraction_source"] == "model"
+    # Only the ordinary job actually needed the model.
+    assert load_calls == [_MODEL_A]

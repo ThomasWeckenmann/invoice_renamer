@@ -56,10 +56,10 @@ endobj
 7 0 obj
 <<
 /Author (anonymous)
-/CreationDate (D\07220260919121939\05300\04700\047)
+/CreationDate (D\07220260913114240\05300\04700\047)
 /Creator (anonymous)
 /Keywords ()
-/ModDate (D\07220260919121939\05300\04700\047)
+/ModDate (D\07220260913114240\05300\04700\047)
 /Producer (ReportLab PDF Library \055 \050opensource\051)
 /Subject (unspecified)
 /Title (untitled)
@@ -69,7 +69,7 @@ endobj
 8 0 obj
 <<
 /Type /EmbeddedFile
-/Length 1821
+/Length 1814
 >>
 stream
 <?xml version="1.0" encoding="UTF-8"?>
@@ -83,7 +83,7 @@ stream
     </ram:GuidelineSpecifiedDocumentContextParameter>
   </rsm:ExchangedDocumentContext>
   <rsm:ExchangedDocument>
-    <ram:ID>INV-0001</ram:ID>
+    <ram:ID>INV-A</ram:ID>
     <ram:TypeCode>380</ram:TypeCode>
     <ram:IssueDateTime>
       <udt:DateTimeString format="102">20260115</udt:DateTimeString>
@@ -99,7 +99,7 @@ stream
       </ram:SpecifiedLineTradeSettlement>
     </ram:IncludedSupplyChainTradeLineItem>
     <ram:ApplicableHeaderTradeAgreement>
-      <ram:SellerTradeParty><ram:Name>Beispiel GmbH</ram:Name></ram:SellerTradeParty>
+      <ram:SellerTradeParty><ram:Name>Company A</ram:Name></ram:SellerTradeParty>
     </ram:ApplicableHeaderTradeAgreement>
     <ram:ApplicableHeaderTradeSettlement>
       <ram:InvoiceCurrencyCode>EUR</ram:InvoiceCurrencyCode>
@@ -128,11 +128,66 @@ endobj
 endobj
 11 0 obj
 <<
-/Names [ (factur\055x\056xml) 9 0 R ]
+/Names [ (factur\055x\056xml) 9 0 R (factur\055x\056xml) 13 0 R ]
+>>
+endobj
+12 0 obj
+<<
+/Type /EmbeddedFile
+/Length 1814
+>>
+stream
+<?xml version="1.0" encoding="UTF-8"?>
+<rsm:CrossIndustryInvoice
+    xmlns:rsm="urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100"
+    xmlns:ram="urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100"
+    xmlns:udt="urn:un:unece:uncefact:data:standard:UnqualifiedDataType:100">
+  <rsm:ExchangedDocumentContext>
+    <ram:GuidelineSpecifiedDocumentContextParameter>
+      <ram:ID>urn:cen.eu:en16931:2017</ram:ID>
+    </ram:GuidelineSpecifiedDocumentContextParameter>
+  </rsm:ExchangedDocumentContext>
+  <rsm:ExchangedDocument>
+    <ram:ID>INV-B</ram:ID>
+    <ram:TypeCode>380</ram:TypeCode>
+    <ram:IssueDateTime>
+      <udt:DateTimeString format="102">20260115</udt:DateTimeString>
+    </ram:IssueDateTime>
+  </rsm:ExchangedDocument>
+  <rsm:SupplyChainTradeTransaction>
+    <ram:IncludedSupplyChainTradeLineItem>
+      <ram:SpecifiedTradeProduct><ram:Name>Cloud Hosting</ram:Name></ram:SpecifiedTradeProduct>
+      <ram:SpecifiedLineTradeSettlement>
+        <ram:SpecifiedTradeSettlementLineMonetarySummation>
+          <ram:LineTotalAmount>500.00</ram:LineTotalAmount>
+        </ram:SpecifiedTradeSettlementLineMonetarySummation>
+      </ram:SpecifiedLineTradeSettlement>
+    </ram:IncludedSupplyChainTradeLineItem>
+    <ram:ApplicableHeaderTradeAgreement>
+      <ram:SellerTradeParty><ram:Name>Company B</ram:Name></ram:SellerTradeParty>
+    </ram:ApplicableHeaderTradeAgreement>
+    <ram:ApplicableHeaderTradeSettlement>
+      <ram:InvoiceCurrencyCode>EUR</ram:InvoiceCurrencyCode>
+      <ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+        <ram:GrandTotalAmount>595.00</ram:GrandTotalAmount>
+      </ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+    </ram:ApplicableHeaderTradeSettlement>
+  </rsm:SupplyChainTradeTransaction>
+</rsm:CrossIndustryInvoice>
+
+endstream
+endobj
+13 0 obj
+<<
+/Type /Filespec
+/F (factur\055x\056xml)
+/EF <<
+/F 12 0 R
+>>
 >>
 endobj
 xref
-0 12
+0 14
 0000000000 65535 f 
 0000000015 00000 n 
 0000000097 00000 n 
@@ -142,16 +197,18 @@ xref
 0000000649 00000 n 
 0000000756 00000 n 
 0000001045 00000 n 
-0000002938 00000 n 
-0000003018 00000 n 
-0000003062 00000 n 
+0000002931 00000 n 
+0000003011 00000 n 
+0000003055 00000 n 
+0000003143 00000 n 
+0000005030 00000 n 
 trailer
 <<
-/Size 12
+/Size 14
 /Root 1 0 R
 /Info 7 0 R
-/ID [ <b217c1dd5439facf33e09af0846e87ae> <b217c1dd5439facf33e09af0846e87ae> ]
+/ID [ <76b8866f7bc4c9be111fba98000f96ef> <76b8866f7bc4c9be111fba98000f96ef> ]
 >>
 startxref
-3122
+5112
 %%EOF

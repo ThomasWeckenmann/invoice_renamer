@@ -17,9 +17,19 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from PIL import Image
+from pypdf import PdfReader
 
+from invoice_renamer.analysis.extraction_router import (
+    ExtractionSource,
+    merge_xml_and_model,
+    route_xml,
+    xml_fields_used,
+    xml_supplies_filename,
+)
 from invoice_renamer.documents.ocr import OcrEngine, OcrResult, TesseractOcrEngine
+from invoice_renamer.documents.pdf_open import open_validated_pdf
 from invoice_renamer.documents.reader import read_document
+from invoice_renamer.documents.xml_attachments import XmlDiscoveryResult
 from invoice_renamer.extraction.models import InvoiceExtraction
 from invoice_renamer.inference.extractor import extract_invoice
 from invoice_renamer.inference.language_model import LanguageModel
@@ -277,12 +287,71 @@ def run_invoice(
     model_id: str,
     model_revision: str | None,
     ground_truth: dict[str, object] | None,
+    use_xml: bool = False,
 ) -> InvoiceResult:
+    """use_xml=False (the default, and this function's prior behavior) is this
+    benchmark's text-only mode: the model always runs on page text/OCR as if no
+    embedded XML existed, so field-accuracy scores measure the model and are never
+    inflated by XML values standing in for what it actually produced. Pass
+    use_xml=True to instead score the same XML-first routing the real app uses,
+    end to end - a complete XML match then scores as a perfect, zero-inference
+    result rather than a model result."""
     ocr_engine = _TimingOcrEngine(TesseractOcrEngine())
+    reader: PdfReader | None = None
+    xml_result: XmlDiscoveryResult | None = None
+    xml_extraction: InvoiceExtraction | None = None
+    xml_ms = 0
+
+    if use_xml:
+        xml_start = time.perf_counter()
+        try:
+            reader, page_count = open_validated_pdf(pdf_bytes)
+            xml_result, xml_extraction = route_xml(reader)
+        except Exception as error:  # e.g. a corrupt PDF - nothing at all was measured
+            return _crashed_invoice_result(
+                filename,
+                error,
+                model_id=model_id,
+                model_revision=model_revision,
+                ground_truth=ground_truth,
+            )
+        xml_ms = int((time.perf_counter() - xml_start) * 1000)
+
+        if xml_extraction is not None and xml_supplies_filename(xml_extraction):
+            metrics = RunMetrics(
+                total_ms=xml_ms,
+                pdf_extraction_ms=0,
+                ocr_ms=0,
+                inference_ms=0,
+                xml_ms=xml_ms,
+                model_id=model_id,
+                provider="transformers",
+                model_revision=model_revision,
+                pages_total=page_count,
+                pages_ocr=[],
+                warnings=xml_extraction.warnings,
+                extraction_source=ExtractionSource.XML.value,
+                xml_status=xml_result.status.value,
+                xml_attachment_name=xml_result.attachment_name,
+                xml_profile_id=xml_result.profile_id,
+                xml_fields_used=xml_fields_used(xml_extraction),
+                inference_ran=False,
+            )
+            return InvoiceResult(
+                filename=filename,
+                extraction=xml_extraction,
+                metrics=metrics,
+                ground_truth=ground_truth,
+                field_matches=score_extraction(xml_extraction, ground_truth),
+                hallucinated_fields=_hallucinated_fields(xml_extraction, ground_truth),
+                failed=False,
+            )
 
     read_start = time.perf_counter()
     try:
-        document = read_document(pdf_bytes, ocr_engine=ocr_engine)
+        document = read_document(
+            pdf_bytes, ocr_engine=ocr_engine, reader=reader, xml_result=xml_result
+        )
     except Exception as error:  # e.g. a corrupt PDF - nothing at all was measured
         return _crashed_invoice_result(
             filename,
@@ -299,7 +368,7 @@ def run_invoice(
 
     inference_start = time.perf_counter()
     try:
-        extraction = extract_invoice(document, model)
+        model_extraction = extract_invoice(document, model)
     except Exception as error:  # the read succeeded, so keep that real timing/page data
         inference_ms = int((time.perf_counter() - inference_start) * 1000)
         return _crashed_invoice_result(
@@ -316,17 +385,30 @@ def run_invoice(
         )
     inference_ms = int((time.perf_counter() - inference_start) * 1000)
 
+    extraction = (
+        merge_xml_and_model(xml_extraction, model_extraction) if use_xml else model_extraction
+    )
+    fields_from_xml = xml_fields_used(xml_extraction) if use_xml else []
+    source = ExtractionSource.XML_AND_MODEL if fields_from_xml else ExtractionSource.MODEL
+
     metrics = RunMetrics(
-        total_ms=pdf_extraction_ms + ocr_ms + inference_ms,
+        total_ms=xml_ms + pdf_extraction_ms + ocr_ms + inference_ms,
         pdf_extraction_ms=pdf_extraction_ms,
         ocr_ms=ocr_ms,
         inference_ms=inference_ms,
+        xml_ms=xml_ms,
         model_id=model_id,
         provider="transformers",
         model_revision=model_revision,
         pages_total=pages_total,
         pages_ocr=pages_ocr,
         warnings=extraction.warnings,
+        extraction_source=source.value,
+        xml_status=xml_result.status.value if xml_result is not None else "none",
+        xml_attachment_name=xml_result.attachment_name if xml_result is not None else None,
+        xml_profile_id=xml_result.profile_id if xml_result is not None else None,
+        xml_fields_used=fields_from_xml,
+        inference_ran=True,
     )
 
     return InvoiceResult(
@@ -349,6 +431,7 @@ def run_benchmark(
     ground_truth: dict[str, dict[str, object]] | None = None,
     on_invoice_start: Callable[[Path], None] | None = None,
     on_invoice_done: Callable[[InvoiceResult], None] | None = None,
+    use_xml: bool = False,
 ) -> ModelBenchmarkResult:
     result = ModelBenchmarkResult(model_id=model_id)
     for path in pdf_paths:
@@ -363,6 +446,7 @@ def run_benchmark(
                 model_id=model_id,
                 model_revision=model_revision,
                 ground_truth=invoice_ground_truth,
+                use_xml=use_xml,
             )
         except Exception as error:  # e.g. path.read_bytes() itself failing
             invoice_result = _crashed_invoice_result(

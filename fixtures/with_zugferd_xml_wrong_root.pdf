@@ -1,0 +1,124 @@
+%PDF-1.3
+%‚„œ”
+1 0 obj
+<<
+/PageMode /UseNone
+/Pages 2 0 R
+/Type /Catalog
+/Names 10 0 R
+>>
+endobj
+2 0 obj
+<<
+/Count 1
+/Kids [ 3 0 R ]
+/Type /Pages
+>>
+endobj
+3 0 obj
+<<
+/Contents 4 0 R
+/MediaBox [ 0 0 400 500 ]
+/Parent 2 0 R
+/Resources <<
+/Font 5 0 R
+/ProcSet [ /PDF /Text /ImageB /ImageC /ImageI ]
+>>
+/Rotate 0
+/Trans <<
+>>
+/Type /Page
+>>
+endobj
+4 0 obj
+<<
+/Filter [ /ASCII85Decode /FlateDecode ]
+/Length 182
+>>
+stream
+Garp"5mkI_&;B(k:[u5[\u7D.Lih68"[PFr4@"`P<)Z^^p&#$S_M)Q/(6@os:d"`)dfYkC[:QRoZs]G?a<%a"ET]"*"MH-QO8856nt!%Q0bH&]2otQNek)L9F#F^\LV_YXXcbjPIsmcj^nEKJpNMj-R#WR`ilB%R:qWJa:A*`@P9>2S)T4Qb~>
+endstream
+endobj
+5 0 obj
+<<
+/F1 6 0 R
+>>
+endobj
+6 0 obj
+<<
+/BaseFont /Helvetica
+/Encoding /WinAnsiEncoding
+/Name /F1
+/Subtype /Type1
+/Type /Font
+>>
+endobj
+7 0 obj
+<<
+/Author (anonymous)
+/CreationDate (D\07220260919121939\05300\04700\047)
+/Creator (anonymous)
+/Keywords ()
+/ModDate (D\07220260919121939\05300\04700\047)
+/Producer (ReportLab PDF Library \055 \050opensource\051)
+/Subject (unspecified)
+/Title (untitled)
+/Trapped /False
+>>
+endobj
+8 0 obj
+<<
+/Type /EmbeddedFile
+/Length 143
+>>
+stream
+<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2">
+  <ID>INV-0002</ID>
+</Invoice>
+
+endstream
+endobj
+9 0 obj
+<<
+/Type /Filespec
+/F (factur\055x\056xml)
+/EF <<
+/F 8 0 R
+>>
+>>
+endobj
+10 0 obj
+<<
+/EmbeddedFiles 11 0 R
+>>
+endobj
+11 0 obj
+<<
+/Names [ (factur\055x\056xml) 9 0 R ]
+>>
+endobj
+xref
+0 12
+0000000000 65535 f 
+0000000015 00000 n 
+0000000097 00000 n 
+0000000156 00000 n 
+0000000345 00000 n 
+0000000618 00000 n 
+0000000649 00000 n 
+0000000756 00000 n 
+0000001045 00000 n 
+0000001259 00000 n 
+0000001339 00000 n 
+0000001383 00000 n 
+trailer
+<<
+/Size 12
+/Root 1 0 R
+/Info 7 0 R
+/ID [ <b217c1dd5439facf33e09af0846e87ae> <b217c1dd5439facf33e09af0846e87ae> ]
+>>
+startxref
+1443
+%%EOF

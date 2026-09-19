@@ -69,7 +69,7 @@ endobj
 8 0 obj
 <<
 /Type /EmbeddedFile
-/Length 1821
+/Length 1825
 >>
 stream
 <?xml version="1.0" encoding="UTF-8"?>
@@ -79,7 +79,7 @@ stream
     xmlns:udt="urn:un:unece:uncefact:data:standard:UnqualifiedDataType:100">
   <rsm:ExchangedDocumentContext>
     <ram:GuidelineSpecifiedDocumentContextParameter>
-      <ram:ID>urn:cen.eu:en16931:2017</ram:ID>
+      <ram:ID>urn:factur-x.eu:1p0:minimum</ram:ID>
     </ram:GuidelineSpecifiedDocumentContextParameter>
   </rsm:ExchangedDocumentContext>
   <rsm:ExchangedDocument>
@@ -142,9 +142,9 @@ xref
 0000000649 00000 n 
 0000000756 00000 n 
 0000001045 00000 n 
-0000002938 00000 n 
-0000003018 00000 n 
-0000003062 00000 n 
+0000002942 00000 n 
+0000003022 00000 n 
+0000003066 00000 n 
 trailer
 <<
 /Size 12
@@ -153,5 +153,5 @@ trailer
 /ID [ <b217c1dd5439facf33e09af0846e87ae> <b217c1dd5439facf33e09af0846e87ae> ]
 >>
 startxref
-3122
+3126
 %%EOF

@@ -26,11 +26,15 @@ export interface FilenameProposal {
   missing_fields: string[];
 }
 
+export type ExtractionSource = "xml" | "xml_and_model" | "model";
+export type XmlStatus = "none" | "supported" | "unsupported" | "invalid" | "ambiguous";
+
 export interface RunMetrics {
   total_ms: number;
   pdf_extraction_ms: number;
   ocr_ms: number;
   inference_ms: number;
+  xml_ms: number;
   model_id: string;
   provider: string;
   model_revision: string | null;
@@ -40,6 +44,12 @@ export interface RunMetrics {
   output_tokens: number | null;
   tokens_per_second: number | null;
   warnings: string[];
+  extraction_source: ExtractionSource;
+  xml_status: XmlStatus;
+  xml_attachment_name: string | null;
+  xml_profile_id: string | null;
+  xml_fields_used: string[];
+  inference_ran: boolean;
 }
 
 export type JobStatus = "queued" | "running" | "completed" | "failed" | "cancelled";

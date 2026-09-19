@@ -7,6 +7,7 @@ name = "invoice-renamer"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
+    "defusedxml>=0.7.1",
     "fastapi>=0.141.1",
     "huggingface_hub>=1.31.0",
     "ocrmac>=1.0.1; sys_platform == 'darwin'",
@@ -39,7 +40,7 @@ python_version = "3.12"
 strict = true
 
 [[tool.mypy.overrides]]
-module = ["pytesseract", "pypdfium2", "ocrmac", "ocrmac.*"]
+module = ["pytesseract", "pypdfium2", "ocrmac", "ocrmac.*", "defusedxml", "defusedxml.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

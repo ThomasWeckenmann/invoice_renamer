@@ -1,9 +1,12 @@
 """Tests for run_document_analysis, the read -> extract -> filename pipeline behind a job."""
 
 import json
+import time
+from io import BytesIO
 from pathlib import Path
 
 import pytest
+from pypdf import PdfWriter
 
 from invoice_renamer.analysis.pipeline import run_document_analysis
 
@@ -18,23 +21,27 @@ class _FakeLanguageModel:
         return self._response
 
 
+def _valid_model_response(**overrides: object) -> str:
+    fields: dict[str, object] = {
+        "invoice_date": "2026-09-12",
+        "seller": "Apple",
+        "product_summary": "MacBook Air",
+        "gross_total": "2180",
+        "currency": "EUR",
+        "language": "en",
+        "warnings": [],
+    }
+    fields.update(overrides)
+    return json.dumps(fields)
+
+
 def test_happy_path_produces_the_same_proposal_as_the_e2e_test() -> None:
     pdf_bytes = (FIXTURES_DIR / "selectable_text_en.pdf").read_bytes()
-    model_response = json.dumps(
-        {
-            "invoice_date": "2026-09-12",
-            "seller": "Apple",
-            "product_summary": "MacBook Air",
-            "gross_total": "2180",
-            "currency": "EUR",
-            "language": "en",
-            "warnings": [],
-        }
-    )
+    model_response = _valid_model_response()
 
     proposal, metrics = run_document_analysis(
         pdf_bytes,
-        _FakeLanguageModel(model_response),
+        lambda: _FakeLanguageModel(model_response),
         model_id="qwen3-0.6b",
         model_revision="c1899de289a04d12100db370d81485cdf75e47ca",
     )
@@ -49,13 +56,276 @@ def test_happy_path_produces_the_same_proposal_as_the_e2e_test() -> None:
     assert metrics.model_id == "qwen3-0.6b"
     assert metrics.model_revision == "c1899de289a04d12100db370d81485cdf75e47ca"
     assert metrics.provider == "transformers"
+    assert metrics.extraction_source == "model"
+    assert metrics.xml_status == "none"
+    assert metrics.inference_ran is True
 
 
 def test_a_corrupt_pdf_raises_instead_of_returning_a_synthesized_result() -> None:
+    def _never_called() -> _FakeLanguageModel:
+        raise AssertionError("model must not load for a PDF that fails to open")
+
     with pytest.raises(ValueError):
         run_document_analysis(
             b"not a pdf",
-            _FakeLanguageModel("{}"),
+            _never_called,
             model_id="qwen3-0.6b",
             model_revision=None,
         )
+
+
+def test_complete_xml_skips_ocr_and_never_loads_a_model() -> None:
+    pdf_bytes = (FIXTURES_DIR / "with_zugferd_xml.pdf").read_bytes()
+
+    def _never_called() -> _FakeLanguageModel:
+        raise AssertionError("a complete XML extraction must never need a model")
+
+    proposal, metrics = run_document_analysis(
+        pdf_bytes,
+        _never_called,
+        model_id="qwen3-0.6b",
+        model_revision=None,
+    )
+
+    assert proposal.proposed_filename == "2026-01-15_Beispiel-GmbH_Cloud-Hosting_595-EUR.pdf"
+    assert proposal.requires_review is False
+    assert metrics.extraction_source == "xml"
+    assert metrics.xml_status == "supported"
+    assert metrics.xml_attachment_name == "factur-x.xml"
+    assert metrics.inference_ran is False
+    assert metrics.ocr_ms == 0
+    assert metrics.inference_ms == 0
+    assert metrics.pages_total == 1
+    assert metrics.pages_ocr == []
+    assert set(metrics.xml_fields_used) == {
+        "invoice_date",
+        "seller",
+        "product_summary",
+        "gross_total",
+        "currency",
+    }
+
+
+def test_partial_xml_falls_back_to_the_model_for_the_missing_field_only() -> None:
+    pdf_bytes = (FIXTURES_DIR / "with_zugferd_xml_partial.pdf").read_bytes()
+    # The model is scripted to also disagree on fields XML *did* supply - those
+    # must not win, only the seller it's uniquely providing should land.
+    model_response = _valid_model_response(
+        seller="Model Seller",
+        invoice_date="2030-01-01",
+        gross_total="1",
+        currency="USD",
+        product_summary="Wrong Product",
+    )
+    calls: list[str] = []
+
+    def _spy_model() -> _FakeLanguageModel:
+        calls.append("loaded")
+        return _FakeLanguageModel(model_response)
+
+    proposal, metrics = run_document_analysis(
+        pdf_bytes,
+        _spy_model,
+        model_id="qwen3-0.6b",
+        model_revision=None,
+    )
+
+    assert calls == ["loaded"]
+    assert proposal.extraction.seller == "Model Seller"
+    assert proposal.extraction.invoice_date.isoformat() == "2026-01-15"
+    assert str(proposal.extraction.gross_total) == "595.00"
+    assert proposal.extraction.currency == "EUR"
+    assert proposal.extraction.product_summary == "Cloud Hosting"
+    assert metrics.extraction_source == "xml_and_model"
+    assert metrics.inference_ran is True
+    assert set(metrics.xml_fields_used) == {
+        "invoice_date",
+        "product_summary",
+        "gross_total",
+        "currency",
+    }
+
+
+def test_invalid_xml_falls_back_to_the_model_with_a_warning() -> None:
+    pdf_bytes = (FIXTURES_DIR / "with_zugferd_xml_malformed.pdf").read_bytes()
+    model_response = _valid_model_response()
+
+    proposal, metrics = run_document_analysis(
+        pdf_bytes,
+        lambda: _FakeLanguageModel(model_response),
+        model_id="qwen3-0.6b",
+        model_revision=None,
+    )
+
+    assert proposal.extraction.seller == "Apple"
+    assert metrics.extraction_source == "model"
+    assert metrics.xml_status == "invalid"
+    assert metrics.inference_ran is True
+    assert any("not valid XML" in warning for warning in proposal.extraction.warnings)
+
+
+def test_ambiguous_xml_falls_back_to_the_model_with_a_warning() -> None:
+    pdf_bytes = (FIXTURES_DIR / "with_zugferd_xml_multiple_distinct.pdf").read_bytes()
+    model_response = _valid_model_response()
+
+    proposal, metrics = run_document_analysis(
+        pdf_bytes,
+        lambda: _FakeLanguageModel(model_response),
+        model_id="qwen3-0.6b",
+        model_revision=None,
+    )
+
+    assert metrics.xml_status == "ambiguous"
+    assert metrics.extraction_source == "model"
+    assert any("multiple distinct" in warning for warning in proposal.extraction.warnings)
+
+
+def test_fallback_model_failure_still_surfaces_partial_xml_and_the_failure_warning() -> None:
+    pdf_bytes = (FIXTURES_DIR / "with_zugferd_xml_partial.pdf").read_bytes()
+
+    proposal, metrics = run_document_analysis(
+        pdf_bytes,
+        lambda: _FakeLanguageModel("not json"),
+        model_id="qwen3-0.6b",
+        model_revision=None,
+    )
+
+    # XML's own fields survive even though the model side failed entirely.
+    assert proposal.extraction.invoice_date.isoformat() == "2026-01-15"
+    assert proposal.extraction.product_summary == "Cloud Hosting"
+    assert proposal.extraction.seller is None
+    assert "seller" in proposal.missing_fields
+    assert any("could not be validated" in warning for warning in proposal.extraction.warnings)
+    assert metrics.inference_ran is True
+
+
+def test_model_load_crash_preserves_partial_xml_instead_of_failing_the_job() -> None:
+    # Distinct from the case above: here the fallback *machinery itself* raises
+    # (a model-load crash, not just bad model output), which used to propagate
+    # uncaught and lose the already-valid XML fields entirely.
+    pdf_bytes = (FIXTURES_DIR / "with_zugferd_xml_partial.pdf").read_bytes()
+
+    def _crashing_factory() -> _FakeLanguageModel:
+        raise RuntimeError("simulated model-load failure")
+
+    proposal, metrics = run_document_analysis(
+        pdf_bytes,
+        _crashing_factory,
+        model_id="qwen3-0.6b",
+        model_revision=None,
+    )
+
+    assert proposal.extraction.invoice_date.isoformat() == "2026-01-15"
+    assert proposal.extraction.product_summary == "Cloud Hosting"
+    assert proposal.extraction.seller is None
+    assert "seller" in proposal.missing_fields
+    assert any("model fallback failed" in warning for warning in proposal.extraction.warnings)
+    assert metrics.extraction_source == "xml"
+    assert metrics.inference_ran is False
+    assert metrics.ocr_ms == 0
+    assert metrics.inference_ms == 0
+
+
+def test_generate_crash_reports_inference_ran_true_not_a_contradiction() -> None:
+    # Distinct again: here generate() was actually invoked (unlike the model-load
+    # crash above, where it never got that far) and ran for a measurable time
+    # before raising. inference_ran must agree with the nonzero inference_ms -
+    # reporting "0ms, never ran" right next to a real duration is self-contradictory.
+    pdf_bytes = (FIXTURES_DIR / "with_zugferd_xml_partial.pdf").read_bytes()
+
+    class _CrashingModel:
+        def generate(self, prompt: str) -> str:
+            time.sleep(0.02)
+            raise RuntimeError("simulated generate() crash mid-inference")
+
+    proposal, metrics = run_document_analysis(
+        pdf_bytes,
+        lambda: _CrashingModel(),
+        model_id="qwen3-0.6b",
+        model_revision=None,
+    )
+
+    assert metrics.inference_ran is True
+    assert metrics.inference_ms > 0
+    assert metrics.extraction_source == "xml"
+    assert any("model fallback failed" in warning for warning in proposal.extraction.warnings)
+
+
+def test_fallback_crash_with_no_xml_at_all_still_fails_the_job() -> None:
+    # No XML fields exist to preserve here, so this must behave exactly as
+    # before the fix: propagate, and let the caller (the coordinator) fail
+    # the job rather than manufacture a result from nothing.
+    pdf_bytes = (FIXTURES_DIR / "selectable_text_en.pdf").read_bytes()
+
+    def _crashing_factory() -> _FakeLanguageModel:
+        raise RuntimeError("simulated model-load failure")
+
+    with pytest.raises(RuntimeError, match="simulated model-load failure"):
+        run_document_analysis(
+            pdf_bytes,
+            _crashing_factory,
+            model_id="qwen3-0.6b",
+            model_revision=None,
+        )
+
+
+def test_xml_detected_with_zero_usable_fields_plus_crash_still_fails_the_job() -> None:
+    # xml_extraction is not None here (XML was SUPPORTED), but every field was
+    # rejected (ambiguous seller) - fields_from_xml is empty, so there's nothing
+    # to preserve. Must behave like the "no XML at all" case, not silently
+    # succeed with an all-None extraction mislabeled as an XML result.
+    xml = b"""<?xml version="1.0" encoding="UTF-8"?>
+<rsm:CrossIndustryInvoice
+    xmlns:rsm="urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100"
+    xmlns:ram="urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100">
+  <rsm:ExchangedDocumentContext>
+    <ram:GuidelineSpecifiedDocumentContextParameter><ram:ID>urn:cen.eu:en16931:2017</ram:ID></ram:GuidelineSpecifiedDocumentContextParameter>
+  </rsm:ExchangedDocumentContext>
+  <rsm:ExchangedDocument><ram:ID>NOFIELDS-1</ram:ID></rsm:ExchangedDocument>
+  <rsm:SupplyChainTradeTransaction>
+    <ram:ApplicableHeaderTradeAgreement>
+      <ram:SellerTradeParty><ram:Name>Seller A</ram:Name></ram:SellerTradeParty>
+      <ram:SellerTradeParty><ram:Name>Seller B</ram:Name></ram:SellerTradeParty>
+    </ram:ApplicableHeaderTradeAgreement>
+  </rsm:SupplyChainTradeTransaction>
+</rsm:CrossIndustryInvoice>"""
+    writer = PdfWriter(clone_from=str(FIXTURES_DIR / "selectable_text_en.pdf"))
+    writer.add_attachment("factur-x.xml", xml)
+    buffer = BytesIO()
+    writer.write(buffer)
+    pdf_bytes = buffer.getvalue()
+
+    def _crashing_factory() -> _FakeLanguageModel:
+        raise RuntimeError("simulated model crash")
+
+    with pytest.raises(RuntimeError, match="simulated model crash"):
+        run_document_analysis(
+            pdf_bytes,
+            _crashing_factory,
+            model_id="qwen3-0.6b",
+            model_revision=None,
+        )
+
+
+def test_fallback_crash_preserves_real_ocr_and_page_timing_not_zeros() -> None:
+    # Partial XML attached to a scanned (no text layer) page, so read_document
+    # must actually run OCR before the model crashes - the recovered metrics
+    # must reflect that real work, not report it as if nothing happened.
+    pdf_bytes = (FIXTURES_DIR / "with_zugferd_xml_partial_scanned.pdf").read_bytes()
+
+    def _crashing_factory() -> _FakeLanguageModel:
+        raise RuntimeError("simulated model crash")
+
+    proposal, metrics = run_document_analysis(
+        pdf_bytes,
+        _crashing_factory,
+        model_id="qwen3-0.6b",
+        model_revision=None,
+    )
+
+    assert metrics.extraction_source == "xml"
+    assert metrics.pages_total == 1
+    assert metrics.pages_ocr == [1]
+    assert metrics.ocr_ms > 0
+    assert metrics.total_ms >= metrics.ocr_ms
+    assert proposal.extraction.invoice_date.isoformat() == "2026-01-15"

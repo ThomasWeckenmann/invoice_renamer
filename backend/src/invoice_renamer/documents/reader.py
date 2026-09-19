@@ -1,51 +1,55 @@
-"""Extracts per-page text from PDF bytes, detects embedded ZUGFeRD/Factur-X XML, and
-OCRs pages whose extracted text is too short to be usable.
+"""Extracts per-page text from PDF bytes and OCRs pages whose extracted text is too
+short to be usable. Embedded ZUGFeRD/Factur-X XML discovery lives in
+xml_attachments.py, so it can run without paying for this module's page/OCR work.
 """
-
-from io import BytesIO
 
 from pypdf import PdfReader
 from pypdf._page import PageObject
-from pypdf.errors import PyPdfError
 
 from invoice_renamer.documents.models import NormalizedDocument, PageText
 from invoice_renamer.documents.ocr import OcrEngine, default_ocr_engine
+from invoice_renamer.documents.pdf_open import open_validated_pdf
 from invoice_renamer.documents.render import render_page_to_image
+from invoice_renamer.documents.xml_attachments import (
+    XmlDiscoveryResult,
+    XmlDiscoveryStatus,
+    discover_invoice_xml,
+)
 
 # Below this many non-whitespace characters, a page's extracted text is
 # considered unusable and routed to OCR instead.
 _MIN_USABLE_TEXT_CHARS = 20
 
-# Sanity ceiling; real invoices are a handful of pages.
-_MAX_PAGES = 200
 
-# Standard attachment filenames used by the ZUGFeRD/Factur-X specs, checked
-# case-insensitively.
-_ZUGFERD_ATTACHMENT_NAMES = {
-    "zugferd-invoice.xml",
-    "factur-x.xml",
-    "xrechnung.xml",
-}
+def read_document(
+    pdf_bytes: bytes,
+    *,
+    ocr_engine: OcrEngine | None = None,
+    reader: PdfReader | None = None,
+    xml_result: XmlDiscoveryResult | None = None,
+) -> NormalizedDocument:
+    """Reads every page's text (OCR-ing pages that need it) and reports any
+    supported embedded invoice XML as decoded text.
 
-
-def read_document(pdf_bytes: bytes, *, ocr_engine: OcrEngine | None = None) -> NormalizedDocument:
-    try:
-        reader = PdfReader(BytesIO(pdf_bytes))
-        page_count = len(reader.pages)
-    except (PyPdfError, ValueError) as error:
-        raise ValueError(f"not a readable PDF: {error}") from error
-
-    if page_count == 0:
-        raise ValueError("PDF has no pages")
-    if page_count > _MAX_PAGES:
-        raise ValueError(f"PDF has too many pages (> {_MAX_PAGES})")
+    `reader` and `xml_result` let a caller that already opened/validated the PDF
+    and ran XML discovery (the analysis pipeline) reuse that work instead of
+    re-parsing the PDF and re-decompressing the attachment a second time.
+    """
+    if reader is None:
+        reader, _ = open_validated_pdf(pdf_bytes)
+    if xml_result is None:
+        xml_result = discover_invoice_xml(reader)
 
     ocr_engine = ocr_engine or default_ocr_engine()
     pages = [
         _read_page(index, page, pdf_bytes, ocr_engine) for index, page in enumerate(reader.pages)
     ]
 
-    return NormalizedDocument(pages=pages, embedded_xml=_find_embedded_xml(reader))
+    embedded_xml = None
+    if xml_result.status == XmlDiscoveryStatus.SUPPORTED and xml_result.candidate is not None:
+        embedded_xml = xml_result.candidate.raw_bytes.decode("utf-8", errors="replace")
+
+    return NormalizedDocument(pages=pages, embedded_xml=embedded_xml)
 
 
 def _read_page(index: int, page: PageObject, pdf_bytes: bytes, ocr_engine: OcrEngine) -> PageText:
@@ -63,13 +67,3 @@ def _read_page(index: int, page: PageObject, pdf_bytes: bytes, ocr_engine: OcrEn
         needs_ocr=True,
         ocr_confidence=result.confidence,
     )
-
-
-def _find_embedded_xml(reader: PdfReader) -> str | None:
-    for name, contents in reader.attachments.items():
-        if name.lower() not in _ZUGFERD_ATTACHMENT_NAMES:
-            continue
-        if not contents:
-            continue
-        return contents[0].decode("utf-8", errors="replace")
-    return None

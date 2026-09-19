@@ -376,6 +376,18 @@
   margin-right: 8px;
 }
 
+.batch-item__field-source {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 99px;
+  background: var(--accent-tint);
+  color: var(--accent);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  vertical-align: middle;
+}
+
 .batch-item__memory-warning,
 .batch-item__flag,
 .batch-item__error,

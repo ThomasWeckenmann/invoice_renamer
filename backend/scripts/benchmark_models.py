@@ -28,6 +28,16 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--device", default="cpu", help="cpu, mps, or cuda")
     parser.add_argument("--report", type=Path, default=None, help="Write full JSON results here")
+    parser.add_argument(
+        "--use-xml",
+        action="store_true",
+        help=(
+            "Score the same XML-first routing the app uses instead of this "
+            "benchmark's default text-only mode. A complete embedded XML match "
+            "then scores as a zero-inference result, not a model result - only "
+            "useful when the invoices under test actually carry supported XML."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -112,6 +122,7 @@ def main() -> None:
             ground_truth=ground_truth,
             on_invoice_start=_on_start,
             on_invoice_done=_on_done,
+            use_xml=args.use_xml,
         )
         # Drop the reference before the next iteration loads its model, so the
         # two don't briefly share memory while the next one is loading.

@@ -2,7 +2,12 @@
  * approve/cancel/remove actions. */
 
 import { useState, type ChangeEvent } from "react";
-import { formatAmount, formatDuration } from "../../../lib/format";
+import {
+  describeExtractionSource,
+  describeXmlDetection,
+  formatAmount,
+  formatDuration,
+} from "../../../lib/format";
 import { openWithSystemDefault } from "../../../lib/tauri/open";
 import type { RenameOutcome } from "../useRenameTransaction";
 import { displayFilename, type BatchItem } from "../types";
@@ -55,6 +60,12 @@ export function BatchItemRow({
     ? `${item.metrics.model_id} · ${formatDuration(item.metrics.total_ms)} · ` +
       `${item.metrics.pages_total} page${item.metrics.pages_total === 1 ? "" : "s"}`
     : "";
+  const xmlBadge = (fieldName: string) =>
+    extraction?.evidence[fieldName]?.xml_field ? (
+      <span className="batch-item__field-source" title="From embedded invoice XML">
+        XML
+      </span>
+    ) : null;
 
   const handleFilenameChange = (event: ChangeEvent<HTMLInputElement>) => {
     onEditFilename(item.id, event.target.value);
@@ -132,13 +143,25 @@ export function BatchItemRow({
           {extraction && (
             <dl className="batch-item__fields">
               <dt>Date</dt>
-              <dd>{extraction.invoice_date ?? "—"}</dd>
+              <dd>
+                {extraction.invoice_date ?? "—"}
+                {xmlBadge("invoice_date")}
+              </dd>
               <dt>Seller</dt>
-              <dd>{extraction.seller ?? "—"}</dd>
+              <dd>
+                {extraction.seller ?? "—"}
+                {xmlBadge("seller")}
+              </dd>
               <dt>Product</dt>
-              <dd>{extraction.product_summary ?? "—"}</dd>
+              <dd>
+                {extraction.product_summary ?? "—"}
+                {xmlBadge("product_summary")}
+              </dd>
               <dt>Amount</dt>
-              <dd>{formatAmount(extraction.gross_total, extraction.currency)}</dd>
+              <dd>
+                {formatAmount(extraction.gross_total, extraction.currency)}
+                {xmlBadge("gross_total")}
+              </dd>
             </dl>
           )}
 
@@ -170,10 +193,23 @@ export function BatchItemRow({
               </summary>
               <dl>
                 <div>
+                  <dt>Source</dt>
+                  <dd>{describeExtractionSource(item.metrics)}</dd>
+                </div>
+                {describeXmlDetection(item.metrics) && (
+                  <div>
+                    <dt>XML</dt>
+                    <dd>{describeXmlDetection(item.metrics)}</dd>
+                  </div>
+                )}
+                <div>
                   <dt>Model</dt>
                   <dd>
-                    {item.metrics.model_id}
-                    {item.metrics.model_revision ? ` @ ${item.metrics.model_revision}` : ""}
+                    {item.metrics.inference_ran
+                      ? `${item.metrics.model_id}${
+                          item.metrics.model_revision ? ` @ ${item.metrics.model_revision}` : ""
+                        }`
+                      : "Not used"}
                   </dd>
                 </div>
                 <div>

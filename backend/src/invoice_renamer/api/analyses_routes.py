@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from invoice_renamer.analysis.memory_preflight import check_memory_headroom
 from invoice_renamer.analysis.pipeline import run_document_analysis
+from invoice_renamer.inference.language_model import LanguageModel
 from invoice_renamer.inference.runtime import LoadInstalledFn, ModelRuntime, select_device
 from invoice_renamer.metrics.models import RunMetrics
 from invoice_renamer.models.capabilities import SystemCapabilities
@@ -199,18 +200,27 @@ class AnalysisCoordinator:
             entry = _entry_or_404(job.model_id)
             # Clear this local reference after each job so the runtime can free
             # the previous model before loading a different one.
-            model = None
-            try:
-                assert job.pdf_bytes is not None
+            model: LanguageModel | None = None
+
+            def load_model() -> LanguageModel:
+                # Deferred until run_document_analysis finds it actually needs
+                # inference - a job that a complete XML extraction can answer
+                # alone must never load a model at all.
+                nonlocal model
                 device = select_device(self._capabilities_fn())
                 model = self._runtime.get_or_load(entry, self._data_dir, device)
+                return model
+
+            try:
+                assert job.pdf_bytes is not None
                 proposal, metrics = run_document_analysis(
-                    job.pdf_bytes, model, model_id=entry.id, model_revision=entry.revision
+                    job.pdf_bytes, load_model, model_id=entry.id, model_revision=entry.revision
                 )
-                # generate() has now actually run on this loaded model, so its
-                # measured footprint is trustworthy for the next submission's
-                # pre-flight credit (see submit()).
-                self._runtime.mark_warmed()
+                if metrics.inference_ran:
+                    # generate() has now actually run on this loaded model, so its
+                    # measured footprint is trustworthy for the next submission's
+                    # pre-flight credit (see submit()).
+                    self._runtime.mark_warmed()
             except Exception as exc:
                 with self._lock:
                     job.status, job.error, job.pdf_bytes = JobStatus.FAILED, str(exc), None
