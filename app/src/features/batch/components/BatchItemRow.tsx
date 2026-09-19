@@ -11,6 +11,7 @@ import {
 import { openWithSystemDefault } from "../../../lib/tauri/open";
 import type { RenameOutcome } from "../useRenameTransaction";
 import { displayFilename, type BatchItem } from "../types";
+import { CloseIcon, OpenIcon, SparkleIcon, TrashIcon } from "./icons";
 
 interface BatchItemRowProps {
   item: BatchItem;
@@ -34,6 +35,10 @@ const STATUS_LABELS: Record<BatchItem["status"], string> = {
   failed: "Failed",
   cancelled: "Cancelled",
 };
+
+function statusLabel(item: BatchItem, isRenamed: boolean): string {
+  return isRenamed && item.status === "approved" ? "Renamed" : STATUS_LABELS[item.status];
+}
 
 export function BatchItemRow({
   item,
@@ -73,6 +78,9 @@ export function BatchItemRow({
     onEditFilename(item.id, event.target.value);
   };
 
+  const statusIndicator =
+    item.status === "running" ? <SparkleIcon className="batch-item__status-icon" /> : null;
+
   const handleOpen = () => {
     setOpenError(null);
     const path = isRenamed ? renameOutcome.destinationPath : item.sourcePath;
@@ -85,6 +93,43 @@ export function BatchItemRow({
     <li className="batch-item" data-status={item.status}>
       <div className="batch-item__header">
         <span className="batch-item__original-name">{item.file.name}</span>
+        <div className="batch-item__icon-actions">
+          <button type="button" className="btn-icon" onClick={handleOpen} aria-label="Open" title="Open">
+            <OpenIcon />
+          </button>
+          {(item.status === "queued" || item.status === "running") && (
+            <button
+              type="button"
+              className="btn-icon"
+              onClick={() => onCancel(item.id)}
+              aria-label="Cancel"
+              title="Cancel"
+            >
+              <CloseIcon />
+            </button>
+          )}
+          {showAnalyze && (
+            <button
+              type="button"
+              className="btn-icon"
+              disabled={!canAnalyze}
+              onClick={() => onAnalyze(item.id)}
+              aria-label={item.status === "pending" ? "Analyze" : "Re-Run"}
+              title={item.status === "pending" ? "Analyze" : "Re-Run"}
+            >
+              <SparkleIcon />
+            </button>
+          )}
+          <button
+            type="button"
+            className="btn-icon"
+            onClick={() => onRemove(item.id)}
+            aria-label="Remove"
+            title="Remove"
+          >
+            <TrashIcon />
+          </button>
+        </div>
         {canReview ? (
           <label
             className={`batch-item__status batch-item__status--toggle${
@@ -101,13 +146,13 @@ export function BatchItemRow({
               }
               aria-label={`${item.status === "approved" ? "Unapprove" : "Approve"} ${item.file.name}`}
             />
-            <span className="batch-item__status-dot" aria-hidden="true" />
-            {STATUS_LABELS[item.status]}
+            {statusIndicator}
+            {statusLabel(item, isRenamed)}
           </label>
         ) : (
           <span className="batch-item__status">
-            <span className="batch-item__status-dot" aria-hidden="true" />
-            {STATUS_LABELS[item.status]}
+            {statusIndicator}
+            {statusLabel(item, isRenamed)}
           </span>
         )}
       </div>
@@ -120,22 +165,15 @@ export function BatchItemRow({
 
       {canReview && item.proposal && (
         <div className="batch-item__review">
-          <label className="batch-item__filename-field">
-            Proposed filename
-            <input
-              type="text"
-              value={displayFilename(item)}
-              onChange={handleFilenameChange}
-              disabled={isRenamed}
-              aria-label={`Proposed filename for ${item.file.name}`}
-            />
-          </label>
+          <input
+            type="text"
+            className="batch-item__filename-input"
+            value={displayFilename(item)}
+            onChange={handleFilenameChange}
+            disabled={isRenamed}
+            aria-label={`Proposed filename for ${item.file.name}`}
+          />
 
-          {renameOutcome?.status === "renamed" && (
-            <p className="batch-item__renamed" role="status">
-              Renamed to {renameOutcome.destinationPath}
-            </p>
-          )}
           {renameOutcome?.status === "failed" && (
             <p role="alert" className="batch-item__error">
               Rename failed: {renameOutcome.message}
@@ -282,30 +320,6 @@ export function BatchItemRow({
           Couldn't open the file: {openError}
         </p>
       )}
-
-      <div className="batch-item__actions">
-        <button type="button" className="btn sm" onClick={handleOpen}>
-          Open
-        </button>
-        {(item.status === "queued" || item.status === "running") && (
-          <button type="button" className="btn sm" onClick={() => onCancel(item.id)}>
-            Cancel
-          </button>
-        )}
-        {showAnalyze && (
-          <button
-            type="button"
-            className="btn sm"
-            disabled={!canAnalyze}
-            onClick={() => onAnalyze(item.id)}
-          >
-            {item.status === "pending" ? "Analyze" : "Re-Run"}
-          </button>
-        )}
-        <button type="button" className="btn sm" onClick={() => onRemove(item.id)}>
-          Remove
-        </button>
-      </div>
     </li>
   );
 }

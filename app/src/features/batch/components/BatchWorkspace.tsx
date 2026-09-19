@@ -10,6 +10,7 @@ import { useRenameTransaction } from "../useRenameTransaction";
 import { BatchList } from "./BatchList";
 import { BatchProgressBar } from "./BatchProgressBar";
 import { ImportDropzone } from "./ImportDropzone";
+import { CheckIcon, EyeIcon, FilterIcon, SparkleIcon } from "./icons";
 import { ModelSelector } from "./ModelSelector";
 
 export function BatchWorkspace() {
@@ -20,6 +21,7 @@ export function BatchWorkspace() {
   const [shortenFields, setShortenFields] = useState(true);
   const [compactView, setCompactView] = useState(true);
   const [issuesOnly, setIssuesOnly] = useState(false);
+  const [modelsCollapsed, setModelsCollapsed] = useState(false);
   const catalog = useModelCatalog();
   const batch = useBatchWorkspace();
   const rename = useRenameTransaction();
@@ -81,17 +83,38 @@ export function BatchWorkspace() {
       </section>
 
       <section className="batch-section">
-        <h2>Model</h2>
-        <ModelSelector
-          models={catalog.models}
-          loading={catalog.loading}
-          error={catalog.error}
-          selectedModelId={selectedModelId}
-          onSelect={setSelectedModelId}
-          onDownload={(modelId) => void catalog.download(modelId)}
-          onRemove={(modelId) => void catalog.remove(modelId)}
-          onRefresh={() => void catalog.refresh()}
-        />
+        <div className="batch-section__header">
+          <h2>Model</h2>
+          <div className="batch-section__header-end">
+            {modelsCollapsed && (
+              <span className="batch-section__header-note">
+                {selectedModel ? selectedModel.entry.display_name : "None selected"}
+              </span>
+            )}
+            <button
+              type="button"
+              className="btn-icon batch-section__collapse"
+              onClick={() => setModelsCollapsed((prev) => !prev)}
+              aria-expanded={!modelsCollapsed}
+              aria-label={modelsCollapsed ? "Expand models" : "Collapse models"}
+              title={modelsCollapsed ? "Expand models" : "Collapse models"}
+            >
+              {modelsCollapsed ? "+" : "−"}
+            </button>
+          </div>
+        </div>
+        {!modelsCollapsed && (
+          <ModelSelector
+            models={catalog.models}
+            loading={catalog.loading}
+            error={catalog.error}
+            selectedModelId={selectedModelId}
+            onSelect={setSelectedModelId}
+            onDownload={(modelId) => void catalog.download(modelId)}
+            onRemove={(modelId) => void catalog.remove(modelId)}
+            onRefresh={() => void catalog.refresh()}
+          />
+        )}
       </section>
 
       <section className="batch-section batch-section--invoices">
@@ -99,26 +122,48 @@ export function BatchWorkspace() {
           <div className="batch-workspace__toolbar-row">
             <h2>Invoices ({batch.items.length})</h2>
             <div className="batch-workspace__toolbar-actions">
-              <button
-                type="button"
-                className="btn sm"
-                disabled={!hasProcessedItem}
-                onClick={() => setCompactView((prev) => !prev)}
+              <EyeIcon className="batch-workspace__group-icon" title="View & filter" />
+              <label
+                className={`btn batch-workspace__toggle${
+                  compactView ? " batch-workspace__toggle--on" : ""
+                }${!hasProcessedItem ? " batch-workspace__toggle--disabled" : ""}`}
+                title={
+                  compactView
+                    ? "Show full details for every row"
+                    : "Hide extracted fields and run details to fit more rows"
+                }
               >
-                {compactView ? "Full view" : "Compact view"}
-              </button>
+                <input
+                  type="checkbox"
+                  className="batch-workspace__toggle-input"
+                  checked={compactView}
+                  disabled={!hasProcessedItem}
+                  onChange={(event) => setCompactView(event.target.checked)}
+                />
+                <span className="batch-workspace__toggle-dot" aria-hidden="true" />
+                Compact view
+              </label>
               <button
                 type="button"
-                className="btn sm"
+                className={`btn${issuesOnly ? " btn--on" : ""}`}
                 disabled={!issuesOnly && issueCount === 0}
                 onClick={() => setIssuesOnly((prev) => !prev)}
+                title={
+                  issuesOnly
+                    ? "Show every invoice again"
+                    : "Show only invoices with warnings or failures"
+                }
               >
-                {issuesOnly ? "Show all" : `Warnings/errors only (${issueCount})`}
+                <FilterIcon className="btn__icon" />
+                {`Warnings/errors (${issueCount})`}
               </button>
+              <span className="batch-workspace__toolbar-divider" aria-hidden="true" />
+              <SparkleIcon className="batch-workspace__group-icon" title="AI analysis" />
               <label
                 className={`btn batch-workspace__toggle${
                   shortenFields ? " batch-workspace__toggle--on" : ""
                 }`}
+                title="Generate shortened seller and product names for the filename"
               >
                 <input
                   type="checkbox"
@@ -134,13 +179,26 @@ export function BatchWorkspace() {
                 className={`btn ok${batch.isAnalyzing ? " btn--analyzing" : ""}`}
                 disabled={!canAnalyzeAll}
                 onClick={handleAnalyze}
+                title={
+                  batch.isAnalyzing ? "Analysis in progress" : "Run AI analysis on all pending invoices"
+                }
               >
-                {batch.isAnalyzing && <span className="btn__pulse-dot" aria-hidden="true" />}
+                <SparkleIcon
+                  className={`btn__icon${batch.isAnalyzing ? " btn__icon--pulse" : ""}`}
+                />
                 {batch.isAnalyzing
                   ? "Analyzing…"
                   : `Analyze ${batch.pendingCount > 0 ? `(${batch.pendingCount})` : ""}`}
               </button>
-              <button type="button" className="btn" disabled={reviewCount === 0} onClick={batch.approveAll}>
+              <span className="batch-workspace__toolbar-divider" aria-hidden="true" />
+              <CheckIcon className="batch-workspace__group-icon" title="Batch actions" />
+              <button
+                type="button"
+                className="btn"
+                disabled={reviewCount === 0}
+                onClick={batch.approveAll}
+                title="Approve every invoice awaiting review"
+              >
                 Approve all
               </button>
               <button
@@ -148,6 +206,7 @@ export function BatchWorkspace() {
                 className="btn"
                 disabled={batch.items.length === 0}
                 onClick={batch.removeAll}
+                title="Remove every imported invoice from the list"
               >
                 Remove all
               </button>

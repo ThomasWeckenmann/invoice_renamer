@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 0.32.0 (2026-09-19, claude sonnet-5)
+
+- Redesign the batch workspace toolbar and status pills, and add a collapsible Model panel
+
+  Icon-only row actions, grouped/dividered toolbar buttons with leading
+  icons, tooltips, and a green active-state highlight, a fixed-width
+  status pill, a collapsible Model section that shows the selected model
+  while minimized, and a 1050x950 default startup window size.
+
 ## Version 0.31.0 (2026-09-19, claude sonnet-5)
 
 - Pulse the Analyze button and swap its label to 'Analyzing...' while a run is in flight
