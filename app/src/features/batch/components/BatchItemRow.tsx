@@ -142,26 +142,49 @@ export function BatchItemRow({
 
           {extraction && (
             <dl className="batch-item__fields">
-              <dt>Date</dt>
-              <dd>
-                {extraction.invoice_date ?? "—"}
-                {xmlBadge("invoice_date")}
-              </dd>
-              <dt>Seller</dt>
-              <dd>
-                {extraction.seller ?? "—"}
-                {xmlBadge("seller")}
-              </dd>
-              <dt>Product</dt>
-              <dd>
-                {extraction.product_summary ?? "—"}
-                {xmlBadge("product_summary")}
-              </dd>
-              <dt>Amount</dt>
-              <dd>
-                {formatAmount(extraction.gross_total, extraction.currency)}
-                {xmlBadge("gross_total")}
-              </dd>
+              <div className="batch-item__field">
+                <dt>Date</dt>
+                <dd>
+                  {extraction.invoice_date ?? "—"}
+                  {xmlBadge("invoice_date")}
+                </dd>
+              </div>
+              <div className="batch-item__field">
+                <dt>Seller</dt>
+                <dd>
+                  {extraction.seller_short ?? extraction.seller ?? "—"}
+                  {xmlBadge("seller")}
+                </dd>
+              </div>
+              {extraction.seller_short && extraction.seller_short !== extraction.seller && (
+                <div className="batch-item__field">
+                  <dt>Seller (full)</dt>
+                  <dd className="batch-item__fields-dd--muted">{extraction.seller}</dd>
+                </div>
+              )}
+              <div className="batch-item__field">
+                <dt>Product</dt>
+                <dd>
+                  {extraction.product_summary_short ?? extraction.product_summary ?? "—"}
+                  {xmlBadge("product_summary")}
+                </dd>
+              </div>
+              {extraction.product_summary_short &&
+                extraction.product_summary_short !== extraction.product_summary && (
+                  <div className="batch-item__field">
+                    <dt>Product (full)</dt>
+                    <dd className="batch-item__fields-dd--muted">
+                      {extraction.product_summary}
+                    </dd>
+                  </div>
+                )}
+              <div className="batch-item__field">
+                <dt>Amount</dt>
+                <dd>
+                  {formatAmount(extraction.gross_total, extraction.currency)}
+                  {xmlBadge("gross_total")}
+                </dd>
+              </div>
             </dl>
           )}
 

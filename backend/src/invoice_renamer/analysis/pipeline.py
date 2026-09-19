@@ -27,6 +27,7 @@ from invoice_renamer.documents.xml_attachments import XmlDiscoveryResult
 from invoice_renamer.extraction.models import InvoiceExtraction
 from invoice_renamer.inference.extractor import extract_invoice
 from invoice_renamer.inference.language_model import LanguageModel
+from invoice_renamer.inference.shortener import shorten_fields
 from invoice_renamer.metrics.models import RunMetrics
 from invoice_renamer.naming.builder import build_filename_proposal
 from invoice_renamer.naming.schema import FilenameProposal
@@ -92,6 +93,7 @@ def run_document_analysis(
     *,
     model_id: str,
     model_revision: str | None,
+    shorten_enabled: bool,
 ) -> tuple[FilenameProposal, RunMetrics]:
     xml_start = time.perf_counter()
     reader, page_count = open_validated_pdf(pdf_bytes)
@@ -100,19 +102,40 @@ def run_document_analysis(
     fields_from_xml = xml_fields_used(xml_extraction)
 
     if xml_extraction is not None and xml_supplies_filename(xml_extraction):
+        # XML already answers every filename field, but its seller/product text
+        # comes straight from the invoice (often a verbose marketplace listing
+        # title) - still worth one focused model call to shorten it, when the
+        # user has that turned on. A failure here must not discard an
+        # otherwise-complete XML result.
+        shorten_ms = 0
+        shorten_ran = False
+        shortened_extraction = xml_extraction
+        if shorten_enabled:
+            try:
+                model = model_factory()
+                shorten_start = time.perf_counter()
+                shortened_extraction = shorten_fields(xml_extraction, model)
+                shorten_ms = int((time.perf_counter() - shorten_start) * 1000)
+                shorten_ran = True
+            except Exception as error:
+                shortened_extraction = xml_extraction.model_copy(
+                    update={
+                        "warnings": [*xml_extraction.warnings, f"field shortening failed: {error}"]
+                    }
+                )
         return _xml_only_result(
-            xml_extraction,
+            shortened_extraction,
             xml_result=xml_result,
             xml_ms=xml_ms,
             pdf_extraction_ms=0,
             ocr_ms=0,
-            inference_ms=0,
+            inference_ms=shorten_ms,
             pages_total=page_count,
             pages_ocr=[],
             fields_from_xml=fields_from_xml,
             model_id=model_id,
             model_revision=model_revision,
-            inference_ran=False,
+            inference_ran=shorten_ran,
         )
 
     # Reflect whatever real work actually completed before a possible exception
@@ -146,6 +169,19 @@ def run_document_analysis(
         model = model_factory()
         inference_start = time.perf_counter()
         model_extraction = extract_invoice(document, model)
+        extraction = merge_xml_and_model(xml_extraction, model_extraction)
+        if shorten_enabled:
+            # A shortening failure here is on top of an already-successful
+            # extraction - it must not fall into the except block below, which
+            # would wrongly treat it as a total extraction failure and either
+            # fail an ordinary invoice outright or discard model-supplied
+            # fields for a partial-XML one.
+            try:
+                extraction = shorten_fields(extraction, model)
+            except Exception as error:
+                extraction = extraction.model_copy(
+                    update={"warnings": [*extraction.warnings, f"field shortening failed: {error}"]}
+                )
         inference_ms = int((time.perf_counter() - inference_start) * 1000)
     except Exception as error:
         if not fields_from_xml:
@@ -183,7 +219,6 @@ def run_document_analysis(
             inference_ran=inference_ran,
         )
 
-    extraction = merge_xml_and_model(xml_extraction, model_extraction)
     proposal = build_filename_proposal(extraction)
     source = ExtractionSource.XML_AND_MODEL if fields_from_xml else ExtractionSource.MODEL
     metrics = RunMetrics(

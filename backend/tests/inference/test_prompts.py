@@ -1,7 +1,7 @@
 """Tests for the extraction prompt's field instructions."""
 
 from invoice_renamer.documents.models import NormalizedDocument, PageText
-from invoice_renamer.inference.prompts import build_extraction_prompt
+from invoice_renamer.inference.prompts import build_extraction_prompt, build_shorten_prompt
 
 
 def _document(text: str) -> NormalizedDocument:
@@ -44,3 +44,23 @@ def test_seller_and_product_summary_are_restricted_to_filename_safe_characters()
     assert "become part of a filename" in prompt
     assert "macbook-air" in prompt
     assert "mueller-soehne-gmbh" in prompt
+
+
+def test_shorten_prompt_includes_both_given_fields() -> None:
+    prompt = build_shorten_prompt("Amazon EU S.a r.l.", "Galaxy Projektor 13 in 1")
+
+    assert "Amazon EU S.a r.l." in prompt
+    assert "Galaxy Projektor 13 in 1" in prompt
+
+
+def test_shorten_prompt_asks_for_the_short_json_keys() -> None:
+    prompt = build_shorten_prompt("Amazon", "Galaxy Projektor")
+
+    assert "seller_short" in prompt
+    assert "product_short" in prompt
+
+
+def test_shorten_prompt_forbids_translation() -> None:
+    prompt = build_shorten_prompt("Amazon", "Galaxy Projektor").casefold()
+
+    assert "do not translate" in prompt

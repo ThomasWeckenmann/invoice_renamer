@@ -57,9 +57,16 @@ def _strip_markdown_fence(response: str) -> str:
 
 def _parse(response: str) -> InvoiceExtraction:
     data = json.loads(_strip_markdown_fence(response))
-    # The model is no longer asked for warnings, but instruct-tuned models
-    # commonly echo one back out of training habit; drop it so it can't
-    # leak model-authored text into a field only code should populate.
     if isinstance(data, dict):
+        # The model is no longer asked for warnings, but instruct-tuned models
+        # commonly echo one back out of training habit; drop it so it can't
+        # leak model-authored text into a field only code should populate.
         data.pop("warnings", None)
+        # seller_short/product_summary_short must only ever come from the
+        # dedicated shorten_fields() pass, gated by shorten_enabled - if the
+        # primary extraction response happens to include these keys too
+        # (the prompt doesn't ask for them, but nothing stops a model from
+        # adding them), they must not slip through here regardless.
+        data.pop("seller_short", None)
+        data.pop("product_summary_short", None)
     return InvoiceExtraction.model_validate(data)

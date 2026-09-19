@@ -60,6 +60,8 @@ describe("useBatchWorkspace", () => {
             invoice_date: "2026-01-05",
             seller: "Acme",
             product_summary: "Widget",
+            seller_short: null,
+            product_summary_short: null,
             gross_total: "42.00",
             currency: "EUR",
             language: "en",
@@ -77,9 +79,9 @@ describe("useBatchWorkspace", () => {
     const { result } = renderHook(() => useBatchWorkspace());
     act(() => result.current.addFiles([importedPdf()]));
 
-    act(() => result.current.startAnalysis("granite-3.3-2b"));
+    act(() => result.current.startAnalysis("granite-3.3-2b", true));
     expect(result.current.items[0].status).toBe("queued");
-    expect(analysesApi.submitAnalysis).toHaveBeenCalledWith(expect.any(File), "granite-3.3-2b");
+    expect(analysesApi.submitAnalysis).toHaveBeenCalledWith(expect.any(File), "granite-3.3-2b", true);
 
     await waitFor(() => expect(result.current.items[0].status).toBe("needs_review"), {
       timeout: 3000,
@@ -94,7 +96,7 @@ describe("useBatchWorkspace", () => {
 
     const { result } = renderHook(() => useBatchWorkspace());
     act(() => result.current.addFiles([importedPdf()]));
-    act(() => result.current.startAnalysis("granite-3.3-2b"));
+    act(() => result.current.startAnalysis("granite-3.3-2b", true));
 
     await waitFor(() => expect(result.current.items[0].status).toBe("failed"));
     expect(result.current.items[0].error).toBe("model not installed");
@@ -121,7 +123,7 @@ describe("useBatchWorkspace", () => {
 
     const { result } = renderHook(() => useBatchWorkspace());
     act(() => result.current.addFiles([importedPdf()]));
-    act(() => result.current.startAnalysis("granite-3.3-2b"));
+    act(() => result.current.startAnalysis("granite-3.3-2b", true));
     const id = result.current.items[0].id;
 
     await waitFor(() => expect(result.current.items[0].jobId).toBe("job-1"));
@@ -138,7 +140,7 @@ describe("useBatchWorkspace", () => {
 
     const { result } = renderHook(() => useBatchWorkspace());
     act(() => result.current.addFiles([importedPdf()]));
-    act(() => result.current.startAnalysis("granite-3.3-2b"));
+    act(() => result.current.startAnalysis("granite-3.3-2b", true));
     const id = result.current.items[0].id;
 
     await waitFor(() => expect(result.current.items[0].jobId).toBe("job-1"));
@@ -148,11 +150,11 @@ describe("useBatchWorkspace", () => {
     vi.mocked(analysesApi.submitAnalysis).mockResolvedValue(queuedJob({ id: "job-2" }));
     vi.mocked(analysesApi.fetchJob).mockResolvedValue(queuedJob({ id: "job-2", status: "completed" }));
 
-    act(() => result.current.rerunItem(id, "qwen3-0.6b"));
+    act(() => result.current.rerunItem(id, "qwen3-0.6b", true));
 
     expect(result.current.items[0].status).toBe("queued");
     expect(result.current.items[0].error).toBeNull();
-    expect(analysesApi.submitAnalysis).toHaveBeenLastCalledWith(expect.any(File), "qwen3-0.6b");
+    expect(analysesApi.submitAnalysis).toHaveBeenLastCalledWith(expect.any(File), "qwen3-0.6b", true);
 
     await waitFor(() => expect(result.current.items[0].jobId).toBe("job-2"));
     await waitFor(() => expect(result.current.items[0].status).toBe("needs_review"), {
@@ -173,7 +175,7 @@ describe("useBatchWorkspace", () => {
 
     const { result } = renderHook(() => useBatchWorkspace());
     act(() => result.current.addFiles([importedPdf()]));
-    act(() => result.current.startAnalysis("granite-3.3-2b"));
+    act(() => result.current.startAnalysis("granite-3.3-2b", true));
     const id = result.current.items[0].id;
 
     await waitFor(() => expect(result.current.items[0].jobId).toBe("job-1"));
@@ -186,7 +188,7 @@ describe("useBatchWorkspace", () => {
 
     // Rerun before the stale job-1 poll resolves.
     vi.mocked(analysesApi.submitAnalysis).mockResolvedValueOnce(queuedJob({ id: "job-2" }));
-    act(() => result.current.rerunItem(id, "qwen3-0.6b"));
+    act(() => result.current.rerunItem(id, "qwen3-0.6b", true));
     await waitFor(() => expect(result.current.items[0].jobId).toBe("job-2"));
 
     // The stale job-1 poll now resolves as "running" - it must not clobber
@@ -214,7 +216,7 @@ describe("useBatchWorkspace", () => {
 
     const { result } = renderHook(() => useBatchWorkspace());
     act(() => result.current.addFiles([importedPdf()]));
-    act(() => result.current.startAnalysis("granite-3.3-2b"));
+    act(() => result.current.startAnalysis("granite-3.3-2b", true));
     const id = result.current.items[0].id;
 
     // Cancel while the first submit is still in flight - no job id yet.
@@ -223,7 +225,7 @@ describe("useBatchWorkspace", () => {
 
     // Rerun before the stale submit resolves.
     vi.mocked(analysesApi.submitAnalysis).mockResolvedValueOnce(queuedJob({ id: "job-2" }));
-    act(() => result.current.rerunItem(id, "qwen3-0.6b"));
+    act(() => result.current.rerunItem(id, "qwen3-0.6b", true));
     await waitFor(() => expect(result.current.items[0].jobId).toBe("job-2"));
 
     // The stale first submit now resolves - it must be cancelled on the
@@ -261,7 +263,7 @@ describe("useBatchWorkspace", () => {
     act(() => result.current.addFiles([importedPdf()]));
     const id = result.current.items[0].id;
 
-    act(() => result.current.startAnalysis("granite-3.3-2b"));
+    act(() => result.current.startAnalysis("granite-3.3-2b", true));
     expect(result.current.items[0].status).toBe("queued");
 
     // Cancel while the upload is still pending: no job id exists yet, so
@@ -295,7 +297,7 @@ describe("useBatchWorkspace", () => {
 
     const { result } = renderHook(() => useBatchWorkspace());
     act(() => result.current.addFiles([importedPdf()]));
-    act(() => result.current.startAnalysis("granite-3.3-2b"));
+    act(() => result.current.startAnalysis("granite-3.3-2b", true));
     const id = result.current.items[0].id;
 
     await waitFor(() => expect(result.current.items[0].jobId).toBe("job-1"));

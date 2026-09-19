@@ -30,6 +30,12 @@ class InvoiceExtraction(BaseModel):
     invoice_date: date | None = None
     seller: str | None = None
     product_summary: str | None = None
+    # Populated only by the optional shortening pass (inference/shortener.py);
+    # never sourced from XML or the main extraction call. None means either
+    # shortening was skipped/disabled or found nothing worth changing - either
+    # way, callers fall back to the full seller/product_summary above.
+    seller_short: str | None = None
+    product_summary_short: str | None = None
     gross_total: Decimal | None = None
     currency: str | None = None
     language: Language = Language.UNKNOWN

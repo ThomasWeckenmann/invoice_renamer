@@ -58,6 +58,20 @@ def test_warnings_force_review_even_when_fields_are_complete() -> None:
     assert proposal.missing_fields == []
 
 
+def test_short_fields_are_preferred_over_the_full_seller_and_product() -> None:
+    proposal = build_filename_proposal(
+        _extraction(seller_short="Amazon", product_summary_short="Galaxy Projektor")
+    )
+
+    assert proposal.proposed_filename == "2026-09-12_Amazon_Galaxy-Projektor_2180-EUR.pdf"
+
+
+def test_missing_short_fields_fall_back_to_the_full_seller_and_product() -> None:
+    proposal = build_filename_proposal(_extraction(seller_short=None, product_summary_short=None))
+
+    assert proposal.proposed_filename == "2026-09-12_Apple_MacBook-Air_2180-EUR.pdf"
+
+
 def test_german_umlauts_are_transliterated() -> None:
     proposal = build_filename_proposal(_extraction(seller="Müller & Söhne GmbH"))
 

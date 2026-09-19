@@ -138,6 +138,22 @@ def test_model_supplied_warnings_are_dropped() -> None:
     assert "ambiguous product name" not in extraction.warnings
 
 
+def test_model_supplied_short_fields_are_dropped_even_when_shortening_is_disabled() -> None:
+    # seller_short/product_summary_short must only ever come from the dedicated
+    # shortening pass - if the primary extraction response includes them too
+    # (the prompt doesn't ask for them, but nothing stops a model from adding
+    # them), they must never surface here regardless of the shorten toggle.
+    response = json.dumps(
+        {**json.loads(_VALID_JSON), "seller_short": "Sneaky", "product_summary_short": "Sneaky"}
+    )
+    model = _ScriptedLanguageModel([response])
+
+    extraction = extract_invoice(_document(), model)
+
+    assert extraction.seller_short is None
+    assert extraction.product_summary_short is None
+
+
 def test_document_warnings_are_preserved_on_repeated_failure() -> None:
     document = _document(warnings=["page 1: low OCR confidence on the total"])
     model = _ScriptedLanguageModel(["still not json", "still not json"])

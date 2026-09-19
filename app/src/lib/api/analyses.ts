@@ -3,10 +3,15 @@
 import { apiFetch } from "./client";
 import type { AnalysisJobView } from "./types";
 
-export function submitAnalysis(file: File, modelId: string): Promise<AnalysisJobView> {
+export function submitAnalysis(
+  file: File,
+  modelId: string,
+  shortenFields: boolean,
+): Promise<AnalysisJobView> {
   const form = new FormData();
   form.append("file", file, file.name);
   form.append("model_id", modelId);
+  form.append("shorten_fields", String(shortenFields));
   return apiFetch<AnalysisJobView>("/analyses", { method: "POST", body: form });
 }
 

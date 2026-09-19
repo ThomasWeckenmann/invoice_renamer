@@ -21,6 +21,22 @@ class _FakeLanguageModel:
         return self._response
 
 
+class _ExtractsThenCrashesOnShorten:
+    """Succeeds on the first generate() call (extraction) but raises on any
+    call after that (the shortening pass) - a hard crash, not just bad JSON,
+    since shorten_fields already tolerates bad JSON on its own."""
+
+    def __init__(self, extraction_response: str) -> None:
+        self._extraction_response = extraction_response
+        self._calls = 0
+
+    def generate(self, prompt: str) -> str:
+        self._calls += 1
+        if self._calls == 1:
+            return self._extraction_response
+        raise RuntimeError("simulated shortening crash")
+
+
 def _valid_model_response(**overrides: object) -> str:
     fields: dict[str, object] = {
         "invoice_date": "2026-09-12",
@@ -44,6 +60,7 @@ def test_happy_path_produces_the_same_proposal_as_the_e2e_test() -> None:
         lambda: _FakeLanguageModel(model_response),
         model_id="qwen3-0.6b",
         model_revision="c1899de289a04d12100db370d81485cdf75e47ca",
+        shorten_enabled=True,
     )
 
     assert proposal.proposed_filename == "2026-09-12_Apple_MacBook-Air_2180-EUR.pdf"
@@ -71,30 +88,39 @@ def test_a_corrupt_pdf_raises_instead_of_returning_a_synthesized_result() -> Non
             _never_called,
             model_id="qwen3-0.6b",
             model_revision=None,
+            shorten_enabled=True,
         )
 
 
-def test_complete_xml_skips_ocr_and_never_loads_a_model() -> None:
+def test_complete_xml_skips_ocr_but_still_shortens_seller_and_product() -> None:
+    # XML supplies every filename field, so read_document/OCR are still skipped,
+    # but seller/product_summary still come straight from the invoice's own XML
+    # (often verbose) - one model call shortens them before the filename is built.
     pdf_bytes = (FIXTURES_DIR / "with_zugferd_xml.pdf").read_bytes()
-
-    def _never_called() -> _FakeLanguageModel:
-        raise AssertionError("a complete XML extraction must never need a model")
+    shorten_response = json.dumps({"seller_short": "Beispiel", "product_short": "Hosting"})
 
     proposal, metrics = run_document_analysis(
         pdf_bytes,
-        _never_called,
+        lambda: _FakeLanguageModel(shorten_response),
         model_id="qwen3-0.6b",
         model_revision=None,
+        shorten_enabled=True,
     )
 
-    assert proposal.proposed_filename == "2026-01-15_Beispiel-GmbH_Cloud-Hosting_595-EUR.pdf"
+    assert proposal.proposed_filename == "2026-01-15_Beispiel_Hosting_595-EUR.pdf"
     assert proposal.requires_review is False
+    # The full XML values survive alongside the shortened ones - shortening
+    # never overwrites them, only adds seller_short/product_summary_short.
+    assert proposal.extraction.seller == "Beispiel GmbH"
+    assert proposal.extraction.seller_short == "Beispiel"
+    assert proposal.extraction.product_summary == "Cloud Hosting"
+    assert proposal.extraction.product_summary_short == "Hosting"
     assert metrics.extraction_source == "xml"
     assert metrics.xml_status == "supported"
     assert metrics.xml_attachment_name == "factur-x.xml"
-    assert metrics.inference_ran is False
+    assert metrics.inference_ran is True
     assert metrics.ocr_ms == 0
-    assert metrics.inference_ms == 0
+    assert metrics.inference_ms >= 0
     assert metrics.pages_total == 1
     assert metrics.pages_ocr == []
     assert set(metrics.xml_fields_used) == {
@@ -104,6 +130,119 @@ def test_complete_xml_skips_ocr_and_never_loads_a_model() -> None:
         "gross_total",
         "currency",
     }
+
+
+def test_shorten_disabled_never_loads_a_model_for_a_complete_xml_result() -> None:
+    # With the global toggle off, a complete XML result must be exactly as
+    # cheap as before the shortening pass existed - no model load at all.
+    pdf_bytes = (FIXTURES_DIR / "with_zugferd_xml.pdf").read_bytes()
+
+    def _never_called() -> _FakeLanguageModel:
+        raise AssertionError("shortening is disabled; the model must not load")
+
+    proposal, metrics = run_document_analysis(
+        pdf_bytes,
+        _never_called,
+        model_id="qwen3-0.6b",
+        model_revision=None,
+        shorten_enabled=False,
+    )
+
+    assert proposal.proposed_filename == "2026-01-15_Beispiel-GmbH_Cloud-Hosting_595-EUR.pdf"
+    assert proposal.extraction.seller_short is None
+    assert proposal.extraction.product_summary_short is None
+    assert metrics.inference_ran is False
+    assert metrics.inference_ms == 0
+
+
+def test_shorten_disabled_skips_the_second_model_call_on_the_model_path() -> None:
+    pdf_bytes = (FIXTURES_DIR / "selectable_text_en.pdf").read_bytes()
+    calls: list[str] = []
+
+    class _CountingModel:
+        def generate(self, prompt: str) -> str:
+            calls.append(prompt)
+            return _valid_model_response()
+
+    proposal, metrics = run_document_analysis(
+        pdf_bytes,
+        lambda: _CountingModel(),
+        model_id="qwen3-0.6b",
+        model_revision=None,
+        shorten_enabled=False,
+    )
+
+    assert len(calls) == 1  # extraction only, no shortening call
+    assert proposal.extraction.seller == "Apple"
+    assert proposal.extraction.seller_short is None
+    assert metrics.inference_ran is True
+
+
+def test_complete_xml_survives_a_shortening_failure_unshortened() -> None:
+    # The shortening call is a nice-to-have on top of an already-complete XML
+    # result - a crash in it (model-load or otherwise) must not turn a good
+    # result into a failed job, just leave the fields as XML supplied them.
+    pdf_bytes = (FIXTURES_DIR / "with_zugferd_xml.pdf").read_bytes()
+
+    def _crashing_factory() -> _FakeLanguageModel:
+        raise RuntimeError("simulated model-load failure")
+
+    proposal, metrics = run_document_analysis(
+        pdf_bytes,
+        _crashing_factory,
+        model_id="qwen3-0.6b",
+        model_revision=None,
+        shorten_enabled=True,
+    )
+
+    assert proposal.proposed_filename == "2026-01-15_Beispiel-GmbH_Cloud-Hosting_595-EUR.pdf"
+    assert metrics.extraction_source == "xml"
+    assert metrics.inference_ran is False
+    assert metrics.inference_ms == 0
+    assert any("field shortening failed" in warning for warning in proposal.extraction.warnings)
+
+
+def test_ordinary_invoice_survives_a_shortening_crash_with_the_extraction_intact() -> None:
+    # No XML at all - a shortening crash here must not discard the extraction
+    # that already succeeded and fail the whole job over an optional add-on.
+    pdf_bytes = (FIXTURES_DIR / "selectable_text_en.pdf").read_bytes()
+    model = _ExtractsThenCrashesOnShorten(_valid_model_response())
+
+    proposal, metrics = run_document_analysis(
+        pdf_bytes,
+        lambda: model,
+        model_id="qwen3-0.6b",
+        model_revision=None,
+        shorten_enabled=True,
+    )
+
+    assert proposal.extraction.seller == "Apple"
+    assert proposal.extraction.product_summary == "MacBook Air"
+    assert proposal.extraction.seller_short is None
+    assert metrics.extraction_source == "model"
+    assert metrics.inference_ran is True
+    assert any("field shortening failed" in warning for warning in proposal.extraction.warnings)
+
+
+def test_partial_xml_survives_a_shortening_crash_keeping_the_models_fields() -> None:
+    # Partial XML plus a shortening crash: must keep the model-supplied seller,
+    # not fall back to the XML-only result (which would lose it entirely).
+    pdf_bytes = (FIXTURES_DIR / "with_zugferd_xml_partial.pdf").read_bytes()
+    model = _ExtractsThenCrashesOnShorten(_valid_model_response(seller="Model Seller"))
+
+    proposal, metrics = run_document_analysis(
+        pdf_bytes,
+        lambda: model,
+        model_id="qwen3-0.6b",
+        model_revision=None,
+        shorten_enabled=True,
+    )
+
+    assert proposal.extraction.seller == "Model Seller"
+    assert proposal.extraction.product_summary == "Cloud Hosting"  # from XML, unaffected
+    assert metrics.extraction_source == "xml_and_model"
+    assert metrics.inference_ran is True
+    assert any("field shortening failed" in warning for warning in proposal.extraction.warnings)
 
 
 def test_partial_xml_falls_back_to_the_model_for_the_missing_field_only() -> None:
@@ -128,6 +267,7 @@ def test_partial_xml_falls_back_to_the_model_for_the_missing_field_only() -> Non
         _spy_model,
         model_id="qwen3-0.6b",
         model_revision=None,
+        shorten_enabled=True,
     )
 
     assert calls == ["loaded"]
@@ -155,6 +295,7 @@ def test_invalid_xml_falls_back_to_the_model_with_a_warning() -> None:
         lambda: _FakeLanguageModel(model_response),
         model_id="qwen3-0.6b",
         model_revision=None,
+        shorten_enabled=True,
     )
 
     assert proposal.extraction.seller == "Apple"
@@ -173,6 +314,7 @@ def test_ambiguous_xml_falls_back_to_the_model_with_a_warning() -> None:
         lambda: _FakeLanguageModel(model_response),
         model_id="qwen3-0.6b",
         model_revision=None,
+        shorten_enabled=True,
     )
 
     assert metrics.xml_status == "ambiguous"
@@ -188,6 +330,7 @@ def test_fallback_model_failure_still_surfaces_partial_xml_and_the_failure_warni
         lambda: _FakeLanguageModel("not json"),
         model_id="qwen3-0.6b",
         model_revision=None,
+        shorten_enabled=True,
     )
 
     # XML's own fields survive even though the model side failed entirely.
@@ -213,6 +356,7 @@ def test_model_load_crash_preserves_partial_xml_instead_of_failing_the_job() -> 
         _crashing_factory,
         model_id="qwen3-0.6b",
         model_revision=None,
+        shorten_enabled=True,
     )
 
     assert proposal.extraction.invoice_date.isoformat() == "2026-01-15"
@@ -243,6 +387,7 @@ def test_generate_crash_reports_inference_ran_true_not_a_contradiction() -> None
         lambda: _CrashingModel(),
         model_id="qwen3-0.6b",
         model_revision=None,
+        shorten_enabled=True,
     )
 
     assert metrics.inference_ran is True
@@ -266,6 +411,7 @@ def test_fallback_crash_with_no_xml_at_all_still_fails_the_job() -> None:
             _crashing_factory,
             model_id="qwen3-0.6b",
             model_revision=None,
+            shorten_enabled=True,
         )
 
 
@@ -304,6 +450,7 @@ def test_xml_detected_with_zero_usable_fields_plus_crash_still_fails_the_job() -
             _crashing_factory,
             model_id="qwen3-0.6b",
             model_revision=None,
+            shorten_enabled=True,
         )
 
 
@@ -321,6 +468,7 @@ def test_fallback_crash_preserves_real_ocr_and_page_timing_not_zeros() -> None:
         _crashing_factory,
         model_id="qwen3-0.6b",
         model_revision=None,
+        shorten_enabled=True,
     )
 
     assert metrics.extraction_source == "xml"

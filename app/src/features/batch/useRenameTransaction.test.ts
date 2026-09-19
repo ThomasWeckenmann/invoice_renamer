@@ -21,6 +21,8 @@ function approvedItem(overrides: Partial<BatchItem> = {}): BatchItem {
         invoice_date: "2026-01-05",
         seller: "Acme",
         product_summary: "Widget",
+        seller_short: null,
+        product_summary_short: null,
         gross_total: "42.00",
         currency: "EUR",
         language: "en",

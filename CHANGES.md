@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 0.25.0 (2026-09-19, claude sonnet-5)
+
+- Add a 'Shorten seller + product names' checkbox and show both the full and shortened values
+
+  A global toggle, read fresh at each Analyze/Re-Run, controls a second
+  model call that shortens seller/product text without overwriting the
+  originals - both display in the review list. Falls back to the full text
+  on failure or when off, and never invents a value for a null field.
+
 ## Version 0.24.0 (2026-09-19, claude sonnet-5)
 
 - Use embedded ZUGFeRD/Factur-X invoice XML as the authoritative source for invoice fields

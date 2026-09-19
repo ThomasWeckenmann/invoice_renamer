@@ -64,11 +64,20 @@ def _auth_headers() -> dict[str, str]:
     return {"Authorization": f"Bearer {TOKEN}"}
 
 
-def _submit(client: TestClient, model_id: str, pdf_bytes: bytes = _VALID_PDF) -> dict[str, object]:
+def _submit(
+    client: TestClient,
+    model_id: str,
+    pdf_bytes: bytes = _VALID_PDF,
+    *,
+    shorten_fields: bool | None = None,
+) -> dict[str, object]:
+    data = {"model_id": model_id}
+    if shorten_fields is not None:
+        data["shorten_fields"] = str(shorten_fields).lower()
     response = client.post(
         "/analyses",
         headers=_auth_headers(),
-        data={"model_id": model_id},
+        data=data,
         files={"file": ("invoice.pdf", pdf_bytes, "application/pdf")},
     )
     assert response.status_code == 202, response.text
@@ -468,10 +477,11 @@ def test_cancel_a_queued_job_marks_it_cancelled_without_ever_running_it(
     block.set()
     _poll_until(client, first["id"], terminal_statuses=("completed",))
 
-    # The cancelled job's own generate() call never happened - only the first
-    # job's did. ModelRuntime's cache would hide this if we only checked the
+    # The cancelled job's own generate() calls never happened - only the first
+    # job's did (one for extraction, one for the seller/product shortening
+    # pass). ModelRuntime's cache would hide this if we only checked the
     # loader, since both jobs share the same cached model.
-    assert len(generate_calls) == 1
+    assert len(generate_calls) == 2
     assert (
         client.get(f"/jobs/{second['id']}", headers=_auth_headers()).json()["status"] == "cancelled"
     )
@@ -679,13 +689,15 @@ _XML_PARTIAL_FIXTURE = (FIXTURES_DIR / "with_zugferd_xml_partial.pdf").read_byte
 _XML_MALFORMED_FIXTURE = (FIXTURES_DIR / "with_zugferd_xml_malformed.pdf").read_bytes()
 
 
-def test_complete_xml_job_never_loads_a_model_and_reports_xml_as_the_source(
+def test_complete_xml_job_still_loads_the_model_once_to_shorten_fields(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Full API happy path: with_zugferd_xml.pdf carries a complete, supported CII
     invoice whose values (Beispiel GmbH / Cloud Hosting / 595.00 EUR / 2026-01-15)
     deliberately differ from its own visible page text (Apple / MacBook Air /
-    2180.00 EUR) - proving the filename and evidence come from XML, not the page."""
+    2180.00 EUR) - proving the filename and evidence come from XML, not the page.
+    The model still loads once here, for the seller/product shortening pass that
+    runs even when XML alone answers every filename field."""
     entry = _entry(_MODEL_A)
     _install(entry, tmp_path)
     load_calls: list[str] = []
@@ -715,11 +727,37 @@ def test_complete_xml_job_never_loads_a_model_and_reports_xml_as_the_source(
     assert metrics["extraction_source"] == "xml"
     assert metrics["xml_status"] == "supported"
     assert metrics["xml_attachment_name"] == "factur-x.xml"
-    assert metrics["inference_ran"] is False
+    assert metrics["inference_ran"] is True
     assert metrics["ocr_ms"] == 0
-    assert metrics["inference_ms"] == 0
+    assert metrics["inference_ms"] >= 0
     assert metrics["pages_ocr"] == []
-    assert load_calls == []  # the model was never loaded for this job
+    assert load_calls == [entry.id]  # loaded once, for the shortening pass
+
+
+def test_shorten_fields_false_skips_the_shortening_pass_and_the_model_load(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry = _entry(_MODEL_A)
+    _install(entry, tmp_path)
+    load_calls: list[str] = []
+    monkeypatch.setattr(
+        TransformersExtractor,
+        "load_installed",
+        lambda entry, data_dir, *, device: (
+            load_calls.append(entry.id) or _FakeExtractor(_VALID_MODEL_RESPONSE)
+        ),
+    )
+
+    submitted = _submit(client, _MODEL_A, _XML_FIXTURE, shorten_fields=False)
+    completed = _poll_until(client, submitted["id"], terminal_statuses=("completed", "failed"))
+
+    assert completed["status"] == "completed"
+    extraction = completed["proposal"]["extraction"]
+    assert extraction["seller"] == "Beispiel GmbH"
+    assert extraction["seller_short"] is None
+    assert extraction["product_summary_short"] is None
+    assert completed["metrics"]["inference_ran"] is False
+    assert load_calls == []  # the global toggle was off, so no model was loaded
 
 
 def test_partial_xml_job_merges_model_fallback_without_overwriting_xml_fields(
@@ -817,5 +855,7 @@ def test_a_batch_can_mix_xml_only_and_model_based_jobs(
 
     assert xml_completed["metrics"]["extraction_source"] == "xml"
     assert ordinary_completed["metrics"]["extraction_source"] == "model"
-    # Only the ordinary job actually needed the model.
+    # Both jobs use the model now (the XML job only for shortening), but
+    # ModelRuntime caches by (id, revision), so the second job's request is a
+    # cache hit and load_installed only fires once.
     assert load_calls == [_MODEL_A]

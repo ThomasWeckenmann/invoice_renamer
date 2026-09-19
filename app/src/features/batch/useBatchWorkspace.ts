@@ -42,8 +42,8 @@ export interface UseBatchWorkspaceResult {
   unapproveItem: (id: string) => void;
   approveAll: () => void;
   cancelItem: (id: string) => void;
-  rerunItem: (id: string, modelId: string) => void;
-  startAnalysis: (modelId: string) => void;
+  rerunItem: (id: string, modelId: string, shortenFields: boolean) => void;
+  startAnalysis: (modelId: string, shortenFields: boolean) => void;
   isAnalyzing: boolean;
   pendingCount: number;
   approvedCount: number;
@@ -195,9 +195,9 @@ export function useBatchWorkspace(): UseBatchWorkspaceResult {
   );
 
   const submitItem = useCallback(
-    (item: BatchItem, modelId: string) => {
+    (item: BatchItem, modelId: string, shortenFields: boolean) => {
       const generation = bumpGeneration(item.id);
-      void submitAnalysis(item.file, modelId)
+      void submitAnalysis(item.file, modelId, shortenFields)
         .then((job) => {
           if (!isCurrentGeneration(item.id, generation)) {
             // Cancelled/removed/rerun while the upload was in flight: this
@@ -224,7 +224,7 @@ export function useBatchWorkspace(): UseBatchWorkspaceResult {
   );
 
   const startAnalysis = useCallback(
-    (modelId: string) => {
+    (modelId: string, shortenFields: boolean) => {
       const toSubmit = itemsRef.current.filter((item) => item.status === "pending");
       if (toSubmit.length === 0) {
         return;
@@ -233,14 +233,14 @@ export function useBatchWorkspace(): UseBatchWorkspaceResult {
         prev.map((item) => (item.status === "pending" ? { ...item, status: "queued" } : item)),
       );
       for (const item of toSubmit) {
-        submitItem(item, modelId);
+        submitItem(item, modelId, shortenFields);
       }
     },
     [submitItem],
   );
 
   const rerunItem = useCallback(
-    (id: string, modelId: string) => {
+    (id: string, modelId: string, shortenFields: boolean) => {
       const item = itemsRef.current.find((candidate) => candidate.id === id);
       if (!item) {
         return;
@@ -258,7 +258,7 @@ export function useBatchWorkspace(): UseBatchWorkspaceResult {
         memoryWarning: null,
         error: null,
       });
-      submitItem(item, modelId);
+      submitItem(item, modelId, shortenFields);
     },
     [clearPoll, submitItem, updateItem],
   );

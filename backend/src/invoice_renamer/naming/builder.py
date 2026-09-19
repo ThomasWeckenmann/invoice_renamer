@@ -74,8 +74,10 @@ def _round_amount(value: Decimal | None) -> tuple[str, bool]:
 
 def build_filename_proposal(extraction: InvoiceExtraction) -> FilenameProposal:
     date_part, date_missing = _format_date(extraction.invoice_date)
-    seller_part, seller_missing = _normalize_segment(extraction.seller)
-    product_part, product_missing = _normalize_segment(extraction.product_summary)
+    seller_part, seller_missing = _normalize_segment(extraction.seller_short or extraction.seller)
+    product_part, product_missing = _normalize_segment(
+        extraction.product_summary_short or extraction.product_summary
+    )
     amount_part, amount_missing = _round_amount(extraction.gross_total)
     currency_missing = extraction.currency is None
     currency_part = extraction.currency or _MISSING_CURRENCY

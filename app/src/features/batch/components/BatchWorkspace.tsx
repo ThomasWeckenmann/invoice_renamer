@@ -13,6 +13,9 @@ import { ModelSelector } from "./ModelSelector";
 export function BatchWorkspace() {
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
+  // Global, not per-item: read fresh at the moment each analyze/re-run fires,
+  // so toggling it and re-running an item picks up the new value immediately.
+  const [shortenFields, setShortenFields] = useState(true);
   const catalog = useModelCatalog();
   const batch = useBatchWorkspace();
   const rename = useRenameTransaction();
@@ -27,13 +30,13 @@ export function BatchWorkspace() {
 
   const handleAnalyze = () => {
     if (selectedModelId) {
-      batch.startAnalysis(selectedModelId);
+      batch.startAnalysis(selectedModelId, shortenFields);
     }
   };
 
   const handleAnalyzeItem = (id: string) => {
     if (selectedModelId && canAnalyzeItem) {
-      batch.rerunItem(id, selectedModelId);
+      batch.rerunItem(id, selectedModelId, shortenFields);
     }
   };
 
@@ -73,6 +76,14 @@ export function BatchWorkspace() {
         <div className="batch-workspace__toolbar">
           <h2>Invoices ({batch.items.length})</h2>
           <div className="batch-workspace__toolbar-actions">
+            <label className="batch-workspace__option">
+              <input
+                type="checkbox"
+                checked={shortenFields}
+                onChange={(event) => setShortenFields(event.target.checked)}
+              />
+              Shorten seller + product names
+            </label>
             <button type="button" className="btn" disabled={!canAnalyzeAll} onClick={handleAnalyze}>
               Analyze {batch.pendingCount > 0 ? `(${batch.pendingCount})` : ""}
             </button>

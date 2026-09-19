@@ -4,6 +4,7 @@ This file is for coding agents and contributors working in this repository. Keep
 
 ## Working Rules
 
+- Keep chat replies terse. Plain step-by-step instructions (exact commands, exact lines) over prose explanations. No preamble, no restating what was asked, no trailing summary unless asked. The user reads every word slower than it's generated - don't waste their time.
 - Do not implement code, dependency, configuration, documentation, or repository-instruction changes unless the user explicitly asks for changes. Treat reports, observations, questions, and diagnostic statements as discussion only until the user asks for edits. This includes when the user asks a workflow/process question ("should we do X now or later?", "do you want me to commit first?") — answer the question and stop; a question is not authorization to implement, even if your answer proposes a concrete next step.
 - The user handles staging, tracking, and committing once everything is as expected. Do not flag untracked, unstaged, or uncommitted files in reviews unless the user explicitly asks for git state.
 - Prefer existing local patterns over new abstractions.

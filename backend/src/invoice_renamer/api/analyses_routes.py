@@ -51,6 +51,7 @@ class AnalysisJob:
     original_filename: str
     status: JobStatus
     pdf_bytes: bytes | None  # dropped once terminal
+    shorten_fields: bool = True
     proposal: FilenameProposal | None = None
     metrics: RunMetrics | None = None
     error: str | None = None
@@ -122,7 +123,12 @@ class AnalysisCoordinator:
         self._worker.start()
 
     def submit(
-        self, entry: ModelCatalogEntry, pdf_bytes: bytes, original_filename: str
+        self,
+        entry: ModelCatalogEntry,
+        pdf_bytes: bytes,
+        original_filename: str,
+        *,
+        shorten_fields: bool = True,
     ) -> AnalysisJob:
         if not is_installed(entry, self._data_dir):
             raise HTTPException(422, f"model {entry.id!r} is not installed")
@@ -144,6 +150,7 @@ class AnalysisCoordinator:
             original_filename=original_filename,
             status=JobStatus.QUEUED,
             pdf_bytes=pdf_bytes,
+            shorten_fields=shorten_fields,
             memory_warning=check_memory_headroom(
                 entry, self._available_memory_gb_fn(), resident_memory_gb=resident_memory_gb
             ),
@@ -214,7 +221,11 @@ class AnalysisCoordinator:
             try:
                 assert job.pdf_bytes is not None
                 proposal, metrics = run_document_analysis(
-                    job.pdf_bytes, load_model, model_id=entry.id, model_revision=entry.revision
+                    job.pdf_bytes,
+                    load_model,
+                    model_id=entry.id,
+                    model_revision=entry.revision,
+                    shorten_enabled=job.shorten_fields,
                 )
                 if metrics.inference_ran:
                     # generate() has now actually run on this loaded model, so its
@@ -246,7 +257,10 @@ class AnalysisCoordinator:
 
 @analyses_router.post("/analyses", status_code=202)
 async def create_analysis(
-    request: Request, file: UploadFile = File(...), model_id: str = Form(...)
+    request: Request,
+    file: UploadFile = File(...),
+    model_id: str = Form(...),
+    shorten_fields: bool = Form(True),
 ) -> AnalysisJobView:
     entry = _entry_or_404(model_id)
 
@@ -260,7 +274,9 @@ async def create_analysis(
         raise HTTPException(422, "upload is not a PDF file")
 
     coordinator: AnalysisCoordinator = request.app.state.analysis_coordinator
-    job = coordinator.submit(entry, pdf_bytes, file.filename or "upload.pdf")
+    job = coordinator.submit(
+        entry, pdf_bytes, file.filename or "upload.pdf", shorten_fields=shorten_fields
+    )
     return _job_view(job)
 
 

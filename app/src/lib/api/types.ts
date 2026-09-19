@@ -12,6 +12,8 @@ export interface InvoiceExtraction {
   invoice_date: string | null;
   seller: string | null;
   product_summary: string | null;
+  seller_short: string | null;
+  product_summary_short: string | null;
   gross_total: string | null;
   currency: string | null;
   language: Language;

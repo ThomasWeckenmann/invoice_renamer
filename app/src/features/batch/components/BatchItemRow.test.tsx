@@ -49,6 +49,8 @@ function reviewItem(overrides: Partial<BatchItem> = {}): BatchItem {
         invoice_date: "2026-01-05",
         seller: "Acme",
         product_summary: "Widget",
+        seller_short: null,
+        product_summary_short: null,
         gross_total: "42.00",
         currency: "EUR",
         language: "en",
@@ -204,6 +206,8 @@ describe("BatchItemRow", () => {
                 invoice_date: "2026-01-15",
                 seller: "Beispiel GmbH",
                 product_summary: "Cloud Hosting",
+                seller_short: null,
+                product_summary_short: null,
                 gross_total: "595.00",
                 currency: "EUR",
                 language: "unknown",
@@ -295,6 +299,71 @@ describe("BatchItemRow", () => {
     );
 
     expect(screen.queryByText("XML")).not.toBeInTheDocument();
+  });
+
+  it("shows both the shortened and full seller/product when they differ", () => {
+    render(
+      <ul>
+        <BatchItemRow
+          item={reviewItem({
+            proposal: {
+              extraction: {
+                invoice_date: "2026-01-05",
+                seller: "Amazon EU S.a r.l.",
+                product_summary: "Galaxy Projektor, 13 in 1 Home Planetarium Star Light",
+                seller_short: "Amazon",
+                product_summary_short: "Galaxy Projektor",
+                gross_total: "42.00",
+                currency: "EUR",
+                language: "en",
+                evidence: {},
+                warnings: [],
+              },
+              proposed_filename: "2026-01-05_Amazon_Galaxy-Projektor_42-EUR.pdf",
+              requires_review: false,
+              missing_fields: [],
+            },
+          })}
+          onEditFilename={noop}
+          onApprove={noop}
+          onUnapprove={noop}
+          onCancel={noop}
+          onAnalyze={noop}
+          canAnalyze={true}
+          onRemove={noop}
+        />
+      </ul>,
+    );
+
+    expect(screen.getByText("Amazon")).toBeInTheDocument();
+    expect(screen.getByText("Galaxy Projektor")).toBeInTheDocument();
+    expect(screen.getByText("Amazon EU S.a r.l.")).toBeInTheDocument();
+    expect(
+      screen.getByText("Galaxy Projektor, 13 in 1 Home Planetarium Star Light"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Seller (full)")).toBeInTheDocument();
+    expect(screen.getByText("Product (full)")).toBeInTheDocument();
+  });
+
+  it("shows only the full seller/product when nothing was shortened", () => {
+    render(
+      <ul>
+        <BatchItemRow
+          item={reviewItem()}
+          onEditFilename={noop}
+          onApprove={noop}
+          onUnapprove={noop}
+          onCancel={noop}
+          onAnalyze={noop}
+          canAnalyze={true}
+          onRemove={noop}
+        />
+      </ul>,
+    );
+
+    expect(screen.getByText("Acme")).toBeInTheDocument();
+    expect(screen.queryByText("Seller (full)")).not.toBeInTheDocument();
+    expect(screen.queryByText("Product (full)")).not.toBeInTheDocument();
   });
 });
 

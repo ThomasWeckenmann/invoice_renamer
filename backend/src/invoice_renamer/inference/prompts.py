@@ -45,6 +45,30 @@ def build_extraction_prompt(document: NormalizedDocument) -> str:
     return f"{pages}\n\n{_FIELD_INSTRUCTIONS}"
 
 
+_SHORTEN_INSTRUCTIONS = """\
+You shorten invoice fields that were already extracted by another process,
+for use in a filename. You are not extracting from the original invoice
+text - only compressing the two fields given above.
+
+Return a single strict JSON object with exactly these keys:
+
+- seller_short: the brand/company name only. Strip legal suffixes (GmbH,
+  S.a r.l., Inc., Ltd., AG, & Co. KG) and marketplace/entity boilerplate.
+  1-2 words. null if seller above is null.
+- product_short: the core product only. Strip marketing copy, dimensions,
+  compatibility lists, and feature bullets. Keep brand/model names if
+  present. 2-4 words. null if product_summary above is null.
+
+Keep the original language - do not translate. Never invent details that
+aren't in the input. Respond with the raw JSON object only: no markdown
+code fences, no surrounding text."""
+
+
+def build_shorten_prompt(seller: str | None, product_summary: str | None) -> str:
+    fields = f"seller: {seller}\nproduct_summary: {product_summary}"
+    return f"{fields}\n\n{_SHORTEN_INSTRUCTIONS}"
+
+
 def build_repair_prompt(original_prompt: str, previous_response: str, error: str) -> str:
     # generate() is a single stateless call with no guaranteed conversation
     # history, so the invoice text and field instructions must be repeated
