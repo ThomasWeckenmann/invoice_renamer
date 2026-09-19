@@ -96,6 +96,14 @@ export function BatchWorkspace() {
               <button type="button" className="btn" disabled={reviewCount === 0} onClick={batch.approveAll}>
                 Approve all
               </button>
+              <button
+                type="button"
+                className="btn"
+                disabled={batch.items.length === 0}
+                onClick={batch.removeAll}
+              >
+                Remove all
+              </button>
             </div>
           </div>
           <BatchProgressBar items={batch.items} />

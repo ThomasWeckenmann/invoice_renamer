@@ -1,5 +1,12 @@
 # Changelog
 
+## Version 0.28.0 (2026-09-19, claude sonnet-5)
+
+- Add a 'Remove all' button to clear the invoice list in one click
+
+  Cancels any in-flight analysis jobs for queued/running items first, same
+  as removing a single item.
+
 ## Version 0.27.0 (2026-09-19, claude sonnet-5)
 
 - Add a 'Compact view' toggle that hides the field list and run details per invoice row

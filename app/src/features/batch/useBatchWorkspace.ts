@@ -37,6 +37,7 @@ export interface UseBatchWorkspaceResult {
   items: BatchItem[];
   addFiles: (files: ImportedFile[]) => void;
   removeItem: (id: string) => void;
+  removeAll: () => void;
   editFilename: (id: string, filename: string) => void;
   approveItem: (id: string) => void;
   unapproveItem: (id: string) => void;
@@ -164,6 +165,17 @@ export function useBatchWorkspace(): UseBatchWorkspaceResult {
     [bumpGeneration, clearPoll],
   );
 
+  const removeAll = useCallback(() => {
+    for (const item of itemsRef.current) {
+      bumpGeneration(item.id);
+      if (item.jobId && (item.status === "queued" || item.status === "running")) {
+        void cancelJob(item.jobId).catch(() => {});
+      }
+      clearPoll(item.id);
+    }
+    setItems([]);
+  }, [bumpGeneration, clearPoll]);
+
   const editFilename = useCallback(
     (id: string, filename: string) => updateItem(id, { editedFilename: filename }),
     [updateItem],
@@ -277,6 +289,7 @@ export function useBatchWorkspace(): UseBatchWorkspaceResult {
     items,
     addFiles,
     removeItem,
+    removeAll,
     editFilename,
     approveItem,
     unapproveItem,
