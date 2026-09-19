@@ -51,6 +51,16 @@
   background: oklch(0.42 0.06 185);
 }
 
+.btn.ok {
+  background: var(--ok);
+  border-color: oklch(0.44 0.09 155);
+  color: #fff;
+}
+
+.btn.ok:hover:not(:disabled) {
+  background: oklch(0.44 0.09 155);
+}
+
 .btn:disabled {
   color: var(--ink-35);
   background: var(--bg-tint);

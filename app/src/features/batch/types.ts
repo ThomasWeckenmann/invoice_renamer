@@ -34,3 +34,20 @@ export interface BatchItem {
 export function displayFilename(item: BatchItem): string {
   return item.editedFilename ?? item.proposal?.proposed_filename ?? item.file.name;
 }
+
+/** True for a needs_review item carrying extraction warnings or missing
+ * required fields - the subset that needs a second look before approving. */
+export function itemHasWarnings(item: BatchItem): boolean {
+  const proposal = item.proposal;
+  return Boolean(proposal && (proposal.extraction.warnings.length > 0 || proposal.missing_fields.length > 0));
+}
+
+/** True for an item in the batch progress bar's "warnings" or "failed"
+ * bucket - used by the issues-only filter to match the same partition. */
+export function itemHasIssue(item: BatchItem): boolean {
+  return (
+    item.status === "failed" ||
+    item.status === "cancelled" ||
+    (item.status === "needs_review" && itemHasWarnings(item))
+  );
+}

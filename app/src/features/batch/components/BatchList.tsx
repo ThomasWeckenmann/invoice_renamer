@@ -8,6 +8,7 @@ interface BatchListProps {
   items: BatchItem[];
   renameOutcomes: Record<string, RenameOutcome>;
   compact: boolean;
+  emptyMessage?: string;
   onEditFilename: (id: string, filename: string) => void;
   onApprove: (id: string) => void;
   onUnapprove: (id: string) => void;
@@ -21,6 +22,7 @@ export function BatchList({
   items,
   renameOutcomes,
   compact,
+  emptyMessage = "No invoices imported yet.",
   onEditFilename,
   onApprove,
   onUnapprove,
@@ -30,7 +32,7 @@ export function BatchList({
   onRemove,
 }: BatchListProps) {
   if (items.length === 0) {
-    return <p>No invoices imported yet.</p>;
+    return <p>{emptyMessage}</p>;
   }
 
   return (

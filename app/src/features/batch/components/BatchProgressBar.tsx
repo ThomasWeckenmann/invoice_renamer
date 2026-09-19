@@ -1,7 +1,7 @@
 /** Segmented summary bar showing how the batch is split across done, queued,
  * needs-review-with-warnings, and failed/cancelled items. */
 
-import type { BatchItem } from "../types";
+import { itemHasWarnings, type BatchItem } from "../types";
 
 interface BatchCounts {
   total: number;
@@ -9,11 +9,6 @@ interface BatchCounts {
   queued: number;
   warnings: number;
   failed: number;
-}
-
-function hasWarnings(item: BatchItem): boolean {
-  const proposal = item.proposal;
-  return Boolean(proposal && (proposal.extraction.warnings.length > 0 || proposal.missing_fields.length > 0));
 }
 
 function countBatch(items: BatchItem[]): BatchCounts {
@@ -29,7 +24,7 @@ function countBatch(items: BatchItem[]): BatchCounts {
         queued += 1;
         break;
       case "needs_review":
-        if (hasWarnings(item)) {
+        if (itemHasWarnings(item)) {
           warnings += 1;
         } else {
           done += 1;

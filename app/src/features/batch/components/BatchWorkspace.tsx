@@ -3,6 +3,7 @@
 
 import { useState } from "react";
 import "./batch.css";
+import { itemHasIssue } from "../types";
 import { useBatchWorkspace } from "../useBatchWorkspace";
 import { useModelCatalog } from "../useModelCatalog";
 import { useRenameTransaction } from "../useRenameTransaction";
@@ -17,7 +18,8 @@ export function BatchWorkspace() {
   // Global, not per-item: read fresh at the moment each analyze/re-run fires,
   // so toggling it and re-running an item picks up the new value immediately.
   const [shortenFields, setShortenFields] = useState(true);
-  const [compactView, setCompactView] = useState(false);
+  const [compactView, setCompactView] = useState(true);
+  const [issuesOnly, setIssuesOnly] = useState(false);
   const catalog = useModelCatalog();
   const batch = useBatchWorkspace();
   const rename = useRenameTransaction();
@@ -29,6 +31,9 @@ export function BatchWorkspace() {
   const renameableCount = batch.items.filter(
     (item) => item.status === "approved" && rename.outcomes[item.id]?.status !== "renamed",
   ).length;
+  const issueCount = batch.items.filter(itemHasIssue).length;
+  const visibleItems = issuesOnly ? batch.items.filter(itemHasIssue) : batch.items;
+  const hasProcessedItem = batch.items.some((item) => item.proposal !== null || item.metrics !== null);
 
   const handleAnalyze = () => {
     if (selectedModelId) {
@@ -79,8 +84,21 @@ export function BatchWorkspace() {
           <div className="batch-workspace__toolbar-row">
             <h2>Invoices ({batch.items.length})</h2>
             <div className="batch-workspace__toolbar-actions">
-              <button type="button" className="btn sm" onClick={() => setCompactView((prev) => !prev)}>
+              <button
+                type="button"
+                className="btn sm"
+                disabled={!hasProcessedItem}
+                onClick={() => setCompactView((prev) => !prev)}
+              >
                 {compactView ? "Full view" : "Compact view"}
+              </button>
+              <button
+                type="button"
+                className="btn sm"
+                disabled={!issuesOnly && issueCount === 0}
+                onClick={() => setIssuesOnly((prev) => !prev)}
+              >
+                {issuesOnly ? "Show all" : `Warnings/errors only (${issueCount})`}
               </button>
               <label className="batch-workspace__option">
                 <input
@@ -90,7 +108,7 @@ export function BatchWorkspace() {
                 />
                 Shorten seller + product names
               </label>
-              <button type="button" className="btn" disabled={!canAnalyzeAll} onClick={handleAnalyze}>
+              <button type="button" className="btn ok" disabled={!canAnalyzeAll} onClick={handleAnalyze}>
                 Analyze {batch.pendingCount > 0 ? `(${batch.pendingCount})` : ""}
               </button>
               <button type="button" className="btn" disabled={reviewCount === 0} onClick={batch.approveAll}>
@@ -110,9 +128,12 @@ export function BatchWorkspace() {
         </div>
 
         <BatchList
-          items={batch.items}
+          items={visibleItems}
           renameOutcomes={rename.outcomes}
           compact={compactView}
+          emptyMessage={
+            issuesOnly ? "No items with warnings or failures." : "No invoices imported yet."
+          }
           onEditFilename={batch.editFilename}
           onApprove={batch.approveItem}
           onUnapprove={batch.unapproveItem}

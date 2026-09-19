@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 0.29.0 (2026-09-19, claude sonnet-5)
+
+- Default to compact view and add a 'Warnings/errors only' filter button
+
+  The filter matches the progress bar's own warnings/failed buckets (a
+  shared itemHasIssue helper), so both stay in sync. Analyze is now
+  green, and the compact/full view toggle stays disabled until at least
+  one item has been processed (nothing to collapse before then).
+
 ## Version 0.28.0 (2026-09-19, claude sonnet-5)
 
 - Add a 'Remove all' button to clear the invoice list in one click
