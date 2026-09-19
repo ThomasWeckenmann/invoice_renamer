@@ -1,5 +1,13 @@
 # Changelog
 
+## Version 0.31.0 (2026-09-19, claude sonnet-5)
+
+- Pulse the Analyze button and swap its label to 'Analyzing...' while a run is in flight
+
+  Reuses the same pulsing-dot animation already shown on a running
+  item's status pill, so the button keeps giving feedback even though
+  it's disabled for the whole run.
+
 ## Version 0.30.0 (2026-09-19, claude sonnet-5)
 
 - Keep the toolbar and commit bar pinned while the invoice list scrolls independently

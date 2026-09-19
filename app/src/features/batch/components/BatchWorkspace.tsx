@@ -129,8 +129,16 @@ export function BatchWorkspace() {
                 <span className="batch-workspace__toggle-dot" aria-hidden="true" />
                 Shorten Names
               </label>
-              <button type="button" className="btn ok" disabled={!canAnalyzeAll} onClick={handleAnalyze}>
-                Analyze {batch.pendingCount > 0 ? `(${batch.pendingCount})` : ""}
+              <button
+                type="button"
+                className={`btn ok${batch.isAnalyzing ? " btn--analyzing" : ""}`}
+                disabled={!canAnalyzeAll}
+                onClick={handleAnalyze}
+              >
+                {batch.isAnalyzing && <span className="btn__pulse-dot" aria-hidden="true" />}
+                {batch.isAnalyzing
+                  ? "Analyzing…"
+                  : `Analyze ${batch.pendingCount > 0 ? `(${batch.pendingCount})` : ""}`}
               </button>
               <button type="button" className="btn" disabled={reviewCount === 0} onClick={batch.approveAll}>
                 Approve all
