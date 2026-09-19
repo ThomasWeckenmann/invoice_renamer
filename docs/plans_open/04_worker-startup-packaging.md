@@ -1,7 +1,7 @@
 # Worker startup packaging plan
 
-Status: Block 1 complete, its gate cleared. Block 2 implemented, awaiting
-verification on macOS. Blocks 3-5 not started.
+Status: Blocks 1-3 complete and verified on macOS (dev and packaged launches
+both reach readiness at onedir speed). Blocks 4-5 not started.
 
 ## Goal
 
@@ -173,6 +173,57 @@ Two defects found in review and fixed before this block was accepted:
 
 Acceptance: development and packaged launches reach readiness through the
 existing frontend contract, and failures and shutdown leave no worker behind.
+
+### Block 3 notes
+
+`worker.rs` no longer uses `tauri_plugin_shell`'s `sidecar()` API, which
+required an `externalBin` entry that Block 2 had already removed - that call
+would have failed at runtime for every launch. It now resolves the worker's
+absolute path itself: `app.path().resource_dir()` (the packaged app's
+`Contents/Resources`) first, falling back to the dev staging directory
+`scripts/build_worker_sidecar.sh` writes to, resolved from the compiled-in
+`CARGO_MANIFEST_DIR` rather than the process's current directory. Neither
+candidate is looked up on PATH. The fallback is required, not defensive
+padding: Tauri's own resource resolution collapses to the `cargo` output
+directory in a dev run, which never holds the staged worker.
+
+The resolved path is passed straight to `std::process::Command::new`,
+replacing the shell plugin's own command construction; stdout/stdin/stderr
+piping, env vars, process-group detachment, readiness detection, pipe
+draining, and termination are all unchanged. `tauri-plugin-shell` had no
+other caller in this codebase (confirmed by grep) and was not listed in
+`capabilities/default.json`, so its plugin registration and Cargo dependency
+were removed rather than left dead.
+
+A doc comment on `WorkerHandle` asserted the PyInstaller launcher always
+forks a Python child, which was written against the onefile build; it now
+says this differs by build mode and that process-group signaling is what
+makes the distinction not matter.
+
+A review pass (Codex) flagged that the initial version made the dev staging
+fallback unconditional: since `cargo tauri build` runs on the same checkout
+`cargo tauri dev` stages a worker into, a release build with a missing or
+corrupt bundled worker could silently launch the checkout's dev-staged one
+instead, masking the exact packaging defect this resolution exists to catch.
+The dev fallback is now gated on `cfg!(debug_assertions)` - true for `cargo
+tauri dev`, false for `cargo tauri build` - so a release build only ever
+trusts the packaged resource directory.
+
+Verified in this sandbox with an isolated `CARGO_TARGET_DIR` (this checkout's
+`src-tauri/target` is shared with the developer's Mac over virtiofs) and with
+the developer's staged macOS worker under `src-tauri/resources/` temporarily
+moved aside so `build.rs`'s target-triple guard did not block the Linux
+compile, then moved back unchanged: `cargo check --lib`, `cargo test --lib`
+(38 passed, 1 pre-existing ignored), `cargo clippy --lib -- -D warnings`, and
+`cargo fmt --check` all pass. Tests cover path-resolution priority and
+fallback, the fallback being absent for a release build, picking the first
+existing candidate, the not-found error listing every path tried, and a
+spawn against a resolved-but-missing path failing cleanly instead of falling
+back to PATH.
+
+Confirmed on macOS by the developer: both `cargo tauri dev` and
+`scripts/build_macos_app.sh` reach worker readiness through the new
+resolution path, at the onedir startup speed Block 1 measured.
 
 ## Block 4: Happy path end-to-end and performance verification
 

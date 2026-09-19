@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 0.22.1 (2026-09-19, claude sonnet-5)
+
+- bugfix: resolve the worker executable directly instead of the removed externalBin sidecar API
+
+  Block 2 removed the externalBin config the old sidecar() call needed, so
+  it could no longer find anything at launch. Worker spawn now resolves the
+  packaged resource path itself, only falling back to the dev staging path
+  in debug builds, so a release build never masks a missing bundled worker.
+
 ## Version 0.22.0 (2026-09-18, claude opus-5)
 
 - Bundle the worker as a PyInstaller onedir distribution

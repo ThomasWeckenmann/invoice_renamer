@@ -2,15 +2,15 @@
 
 use std::net::TcpListener;
 use std::os::unix::process::CommandExt;
-use std::process::Command as StdCommand;
+use std::path::{Path, PathBuf};
+use std::process::{Command as StdCommand, Stdio};
 use std::time::Duration;
 
 use libc::{c_int, pid_t, SIGKILL, SIGTERM};
 use rand::distr::Alphanumeric;
 use rand::Rng;
 use serde::Serialize;
-use tauri::{AppHandle, Runtime};
-use tauri_plugin_shell::ShellExt;
+use tauri::{AppHandle, Manager, Runtime};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, ChildStderr, ChildStdout, Command as TokioCommand};
 use tokio::sync::oneshot;
@@ -21,6 +21,10 @@ pub const PORT_ENV_VAR: &str = "INVOICE_RENAMER_PORT";
 
 const READY_MARKER: &str = "INVOICE_RENAMER_WORKER_READY";
 const SIDECAR_NAME: &str = "invoice-renamer-worker";
+/// Subdirectory holding the staged worker, under both the packaged app's
+/// resource directory and the local dev staging tree - see
+/// `scripts/build_worker_sidecar.sh` and `scripts/build_macos_app.sh`.
+const WORKER_RESOURCE_SUBDIR: &str = "worker";
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(15);
 const SHUTDOWN_GRACE_PERIOD: Duration = Duration::from_secs(5);
 const GROUP_EXIT_POLL_TIMEOUT: Duration = Duration::from_secs(2);
@@ -35,11 +39,12 @@ pub struct WorkerEndpoint {
 
 /// A running worker process plus the endpoint used to reach it.
 ///
-/// The PyInstaller sidecar is a launcher that forks its own Python child
-/// (and the worker itself shells out to `tesseract`), so `child` alone is
-/// never enough to tear the worker down; `pgid` identifies the whole
+/// Whether the PyInstaller launcher itself forks a separate Python child
+/// differs between its onefile and onedir builds, and the worker also
+/// shells out to `tesseract` for OCR - so `child` alone is never a reliable
+/// handle on everything that needs to die. `pgid` identifies the whole
 /// process group the launcher was placed in at spawn time and is what
-/// shutdown actually targets.
+/// shutdown actually targets, regardless of that internal process shape.
 pub struct WorkerHandle {
     pub endpoint: WorkerEndpoint,
     child: Child,
@@ -161,24 +166,93 @@ async fn terminate(mut child: Child, pgid: u32, grace_period: Duration) {
     wait_for_group_exit(pgid, GROUP_EXIT_POLL_TIMEOUT).await;
 }
 
+/// Absolute paths, in priority order, where the staged worker executable
+/// might live: the packaged app's resource directory first, then - only
+/// when `include_dev_fallback` is set - the directory
+/// `scripts/build_worker_sidecar.sh` stages into for local development. The
+/// dev candidate is built from the compiled-in crate root rather than the
+/// process's current directory, so resolution does not depend on cwd;
+/// neither candidate is looked up on PATH.
+///
+/// The dev fallback must not apply to a release build: `cargo tauri build`
+/// runs on the same checkout that `cargo tauri dev` stages a worker into, so
+/// an unconditional fallback would let a packaged app with a missing or
+/// corrupt bundled worker silently launch the checkout's dev-staged one
+/// instead - masking exactly the packaging defect this resolution exists to
+/// catch. `cargo tauri dev` builds with debug assertions on and `cargo
+/// tauri build` does not, which is what `include_dev_fallback` is keyed on.
+fn worker_executable_candidates(
+    resource_dir: Option<PathBuf>,
+    include_dev_fallback: bool,
+) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(resource_dir) = resource_dir {
+        candidates.push(resource_dir.join(WORKER_RESOURCE_SUBDIR).join(SIDECAR_NAME));
+    }
+    if include_dev_fallback {
+        candidates.push(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("resources")
+                .join(WORKER_RESOURCE_SUBDIR)
+                .join(SIDECAR_NAME),
+        );
+    }
+    candidates
+}
+
+/// Picks the first candidate that exists as a file, or reports every path
+/// that was tried.
+///
+/// Tauri's own resource directory resolution collapses to the `cargo`
+/// output directory in a dev run (there is no bundle to resolve a
+/// `Resources` folder inside), which is why a dev build falls through to
+/// the dev staging path instead of failing outright.
+fn find_worker_executable(candidates: &[PathBuf]) -> Result<PathBuf, String> {
+    candidates
+        .iter()
+        .find(|path| path.is_file())
+        .cloned()
+        .ok_or_else(|| {
+            let tried = candidates
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "worker executable not found; tried: {tried}. Run \
+                 scripts/build_worker_sidecar.sh."
+            )
+        })
+}
+
+/// Resolves the absolute path to the staged worker executable through
+/// Tauri's resource path API, without depending on PATH or the process's
+/// current directory.
+fn resolve_worker_executable<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
+    find_worker_executable(&worker_executable_candidates(
+        app.path().resource_dir().ok(),
+        cfg!(debug_assertions),
+    ))
+}
+
 /// Spawns the worker sidecar and blocks until it reports readiness or fails.
 pub async fn spawn_worker<R: Runtime>(app: &AppHandle<R>) -> Result<WorkerHandle, String> {
     let port = pick_free_port()?;
     let token = generate_session_token();
+    let worker_path = resolve_worker_executable(app)?;
 
-    let command = app
-        .shell()
-        .sidecar(SIDECAR_NAME)
-        .map_err(|err| format!("could not prepare worker sidecar: {err}"))?
+    let mut std_command = StdCommand::new(&worker_path);
+    std_command
         .env(SESSION_TOKEN_ENV_VAR, &token)
-        .env(PORT_ENV_VAR, port.to_string());
-
-    let mut std_command: StdCommand = command.into();
+        .env(PORT_ENV_VAR, port.to_string())
+        .stdout(Stdio::piped())
+        .stdin(Stdio::piped())
+        .stderr(Stdio::piped());
     detach_into_own_process_group(&mut std_command);
 
     let mut child = TokioCommand::from(std_command)
         .spawn()
-        .map_err(|err| format!("could not spawn worker sidecar: {err}"))?;
+        .map_err(|err| format!("could not spawn worker at {}: {err}", worker_path.display()))?;
     let pgid = child.id().expect("freshly spawned child has a pid");
 
     let stdout = child.stdout.take().expect("sidecar stdout is piped");
@@ -241,6 +315,7 @@ async fn wait_for_ready(
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::time::Instant;
 
     use super::*;
@@ -460,5 +535,109 @@ mod tests {
 
         assert_eq!(token.len(), TOKEN_LEN);
         assert!(token.chars().all(|c| c.is_ascii_alphanumeric()));
+    }
+
+    fn unique_temp_dir(label: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "invoice-renamer-worker-resolution-tests-{label}-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("create temp dir for resolution test");
+        dir
+    }
+
+    #[test]
+    fn candidates_check_the_resource_dir_before_the_dev_staging_path() {
+        let resource_dir = std::path::PathBuf::from("/resources/of/the/packaged/app");
+
+        let candidates = worker_executable_candidates(Some(resource_dir.clone()), true);
+
+        assert_eq!(
+            candidates[0],
+            resource_dir.join(WORKER_RESOURCE_SUBDIR).join(SIDECAR_NAME)
+        );
+        assert!(candidates[1]
+            .ends_with(std::path::Path::new(WORKER_RESOURCE_SUBDIR).join(SIDECAR_NAME)));
+    }
+
+    #[test]
+    fn candidates_fall_back_to_only_the_dev_staging_path_without_a_resource_dir() {
+        let candidates = worker_executable_candidates(None, true);
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(
+            candidates[0],
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("resources")
+                .join(WORKER_RESOURCE_SUBDIR)
+                .join(SIDECAR_NAME)
+        );
+    }
+
+    #[test]
+    fn candidates_omit_the_dev_staging_path_when_the_dev_fallback_is_disabled() {
+        // The case a release build must hit: no dev fallback, even with no
+        // resource dir at all, so a missing bundled worker fails instead of
+        // silently picking up whatever is staged in the build machine's checkout.
+        assert!(worker_executable_candidates(None, false).is_empty());
+
+        let resource_dir = std::path::PathBuf::from("/resources/of/the/packaged/app");
+        let candidates = worker_executable_candidates(Some(resource_dir.clone()), false);
+        assert_eq!(
+            candidates,
+            vec![resource_dir.join(WORKER_RESOURCE_SUBDIR).join(SIDECAR_NAME)]
+        );
+    }
+
+    #[test]
+    fn find_worker_executable_skips_a_missing_candidate_for_one_that_exists() {
+        let dir = unique_temp_dir("found");
+        let missing = dir.join("missing").join(SIDECAR_NAME);
+        let staged = dir.join("staged").join(SIDECAR_NAME);
+        fs::create_dir_all(staged.parent().unwrap()).unwrap();
+        fs::write(&staged, b"").expect("write fake staged executable");
+
+        let resolved = find_worker_executable(&[missing, staged.clone()]);
+
+        assert_eq!(resolved, Ok(staged));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn find_worker_executable_reports_every_path_it_tried_when_none_exist() {
+        let dir = unique_temp_dir("missing");
+        let first = dir.join("resource").join(SIDECAR_NAME);
+        let second = dir.join("dev").join(SIDECAR_NAME);
+
+        let err = find_worker_executable(&[first.clone(), second.clone()])
+            .expect_err("neither candidate exists");
+
+        assert!(err.contains(&first.display().to_string()));
+        assert!(err.contains(&second.display().to_string()));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Regression coverage for the launch-failure path introduced by
+    /// resolving the worker ourselves instead of through `tauri_plugin_shell`:
+    /// a resolved path that stops existing between resolution and spawn (or
+    /// was never staged) must surface as a clear spawn error, not a PATH
+    /// fallback to an unrelated same-named executable.
+    #[tokio::test]
+    async fn spawning_a_nonexistent_resolved_path_is_an_error() {
+        let dir = unique_temp_dir("nonexistent-spawn");
+        let missing = dir.join(SIDECAR_NAME);
+
+        let mut std_command = StdCommand::new(&missing);
+        std_command
+            .stdout(Stdio::piped())
+            .stdin(Stdio::piped())
+            .stderr(Stdio::piped());
+        detach_into_own_process_group(&mut std_command);
+
+        let result = TokioCommand::from(std_command).spawn();
+
+        assert!(result.is_err(), "expected Err, got {result:?}");
+        fs::remove_dir_all(&dir).ok();
     }
 }
