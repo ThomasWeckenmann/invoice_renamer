@@ -7,6 +7,7 @@ import { useBatchWorkspace } from "../useBatchWorkspace";
 import { useModelCatalog } from "../useModelCatalog";
 import { useRenameTransaction } from "../useRenameTransaction";
 import { BatchList } from "./BatchList";
+import { BatchProgressBar } from "./BatchProgressBar";
 import { ImportDropzone } from "./ImportDropzone";
 import { ModelSelector } from "./ModelSelector";
 
@@ -74,23 +75,26 @@ export function BatchWorkspace() {
 
       <section className="batch-section">
         <div className="batch-workspace__toolbar">
-          <h2>Invoices ({batch.items.length})</h2>
-          <div className="batch-workspace__toolbar-actions">
-            <label className="batch-workspace__option">
-              <input
-                type="checkbox"
-                checked={shortenFields}
-                onChange={(event) => setShortenFields(event.target.checked)}
-              />
-              Shorten seller + product names
-            </label>
-            <button type="button" className="btn" disabled={!canAnalyzeAll} onClick={handleAnalyze}>
-              Analyze {batch.pendingCount > 0 ? `(${batch.pendingCount})` : ""}
-            </button>
-            <button type="button" className="btn" disabled={reviewCount === 0} onClick={batch.approveAll}>
-              Approve all
-            </button>
+          <div className="batch-workspace__toolbar-row">
+            <h2>Invoices ({batch.items.length})</h2>
+            <div className="batch-workspace__toolbar-actions">
+              <label className="batch-workspace__option">
+                <input
+                  type="checkbox"
+                  checked={shortenFields}
+                  onChange={(event) => setShortenFields(event.target.checked)}
+                />
+                Shorten seller + product names
+              </label>
+              <button type="button" className="btn" disabled={!canAnalyzeAll} onClick={handleAnalyze}>
+                Analyze {batch.pendingCount > 0 ? `(${batch.pendingCount})` : ""}
+              </button>
+              <button type="button" className="btn" disabled={reviewCount === 0} onClick={batch.approveAll}>
+                Approve all
+              </button>
+            </div>
           </div>
+          <BatchProgressBar items={batch.items} />
         </div>
 
         <BatchList

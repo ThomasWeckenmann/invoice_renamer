@@ -1,5 +1,13 @@
 # Changelog
 
+## Version 0.26.0 (2026-09-19, claude sonnet-5)
+
+- Add a segmented progress bar showing done/queued/warnings/failed counts above the invoice list
+
+  Buckets are mutually exclusive: done excludes needs-review items that
+  carry extraction warnings or missing fields (those count as warnings
+  instead), and failed folds in cancelled items.
+
 ## Version 0.25.0 (2026-09-19, claude sonnet-5)
 
 - Add a 'Shorten seller + product names' checkbox and show both the full and shortened values
