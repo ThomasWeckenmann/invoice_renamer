@@ -27,7 +27,7 @@ This project isn't distributed as a built app — build it yourself from source 
 
 From a clone of this repository:
 
-1. Build the Python worker sidecar (PyInstaller, onefile):
+1. Build the Python worker the app bundles (PyInstaller):
 
    ```
    scripts/build_worker_sidecar.sh
@@ -47,19 +47,20 @@ From a clone of this repository:
 
 On first launch, use the model manager in the app to download a local model (e.g. Granite-3.3-2B-Instruct) before analyzing invoices — no model is bundled or downloaded automatically.
 
-Re-run step 1 after changing backend (Python) code — the sidecar binary is a separate build artifact and isn't rebuilt automatically by `cargo tauri dev`.
+Re-run step 1 after changing backend (Python) code — the worker is a separate build artifact and isn't rebuilt automatically by `cargo tauri dev`. It's built for the machine you build it on, and the Tauri build refuses to package a worker built for a different architecture.
 
 ## Building a standalone app
 
 `cargo tauri dev` above is the easiest way to develop or just use the app day to day. To get a real app you can launch directly (e.g. by double-clicking), build a release bundle instead, after completing steps 1 and 2 above:
 
 ```
-cargo tauri build
+scripts/build_macos_app.sh
 ```
 
-This produces a native package under `src-tauri/target/release/bundle/`:
+This produces `src-tauri/target/release/bundle/macos/Invoice Renamer.app`.
 
-- macOS: `macos/Invoice Renamer.app`
-- Linux: `deb/`, `appimage/`, and/or `rpm/`, depending on what's installed
+Use that script rather than `cargo tauri build` on its own. The worker is a directory of libraries that PyInstaller ties together with symlinks, and Tauri's resource bundling resolves symlinks into duplicate files. The script runs the Tauri build, copies the worker into the app with its layout intact, checks the copy arrived complete, and re-signs the app if the build had signed it.
+
+On Linux, `cargo tauri build` still produces `deb/`, `appimage/` and/or `rpm/` packages, but they don't contain the worker; `cargo tauri dev` is the supported way to run the app there.
 
 This app isn't signed or notarized, since it's meant to be built and run by you, not distributed. That means macOS Gatekeeper blocks a plain double-click the first time — right-click the `.app` and choose Open once to bypass that; it opens normally after.

@@ -1,6 +1,7 @@
 # Worker startup packaging plan
 
-Status: proposed; implementation has not started.
+Status: Block 1 complete, its gate cleared. Block 2 implemented, awaiting
+verification on macOS. Blocks 3-5 not started.
 
 ## Goal
 
@@ -48,6 +49,56 @@ one macOS `.app`; its internal worker dependencies are already on disk.
 Acceptance: raw timings identify the startup contribution removed by onedir,
 with a baseline suitable for comparison after integration.
 
+### Block 1 results, measured 2026-09-18
+
+Revision `bf012cf` (dirty), macOS 26.5.2 on arm64, measured directly against
+each built worker with `scripts/measure_worker_startup.py -n 5` — process spawn
+to the readiness marker, not the packaged app. Every run, in seconds:
+
+| build | run | total | to Python | Python to ready |
+| --- | --- | --- | --- | --- |
+| onefile | 1 | 7.383 | 3.401 | 3.982 |
+| onefile | 2 | 6.185 | 3.100 | 3.085 |
+| onefile | 3 | 6.350 | 3.068 | 3.281 |
+| onefile | 4 | 6.303 | 3.038 | 3.265 |
+| onefile | 5 | 6.155 | 2.983 | 3.172 |
+| onefile | median of 2-5 | 6.244 | 3.053 | 3.219 |
+| onedir | 1 | 1.404 | 0.851 | 0.553 |
+| onedir | 2 | 0.440 | 0.120 | 0.321 |
+| onedir | 3 | 0.432 | 0.118 | 0.314 |
+| onedir | 4 | 0.452 | 0.131 | 0.321 |
+| onedir | 5 | 0.486 | 0.120 | 0.366 |
+| onedir | median of 2-5 | 0.446 | 0.120 | 0.321 |
+
+Each median is taken over its own column's per-run values, so the two phases
+are not expected to add up to the total.
+
+On-disk size: onefile 213.8 MB, onedir 651.7 MB in a 61.0 MB executable plus
+its support tree.
+
+What the timings establish: onedir removes roughly 5.8s per launch, in two
+contributions of nearly equal size, only one of which was predicted.
+
+- Bundle extraction, 2.93s, before Python runs at all.
+- The worker's own imports, 2.90s.
+
+What they do not establish is why that second contribution exists. One
+hypothesis is that onefile extracts to a new temporary directory per launch,
+so libraries are loaded and validated from a path macOS has never seen, while
+onedir's stable path lets that work be cached. It fits onedir's first launch
+costing 3x its own median while onefile, cold on every run, showing little
+first-launch penalty - but fitting is not confirming. The test that would
+settle it: run the onedir worker from a freshly copied directory on each
+launch, and see whether its timings return to onefile levels.
+
+Not captured, and worth collecting if that cause is pursued: the built
+worker's dependency versions, and the raw startup logs behind these timings.
+
+The migration is worth doing whatever the cause, and the 15-second startup
+timeout in `worker.rs` needs no change: its headroom goes from 2.4x to roughly
+34x. The cost is 3x the on-disk size, which Block 2 must weigh for the
+per-build resource copy in development, not only for the shipped bundle.
+
 ## Block 2: Build and package the complete worker directory
 
 - Update `scripts/build_worker_sidecar.sh` to produce and stage a complete
@@ -66,6 +117,43 @@ with a baseline suitable for comparison after integration.
 
 Acceptance: the built app contains the complete worker distribution and can
 run it without a system Python installation or the source checkout.
+
+### Why the worker is not a bundled resource
+
+`bundle.resources` turned out to be unusable for this tree. Tauri's
+`copy_resources` calls `copy_file` per entry, which ends in `fs::copy` and so
+follows symlinks; its symlink-preserving `copy_dir` is used for macOS
+frameworks but never for resources. The macOS worker has 24 symlinks in
+`_internal` aliasing libraries that live under `torch/lib` and `PIL/.dylibs`,
+and resolving them produces a second real copy of each, adding roughly 410 MiB.
+PyInstaller documents that dereferencing its symlinks inflates the
+distribution and can cause runtime problems; the duplicate-library failure has
+not been reproduced in this app, and Block 4's model-loading step is where it
+would show up.
+
+Tauri offers no post-bundle hook, so the worker is inserted by
+`scripts/build_macos_app.sh`, which wraps the whole build. Two ordering
+constraints it has to respect: the app is signed during bundling whenever an
+identity is configured, so anything inserted afterwards leaves a stale seal and
+the script re-signs; and the staged worker is architecture-specific, so it
+checks the triple before spending a full compile.
+
+This leaves Linux bundles without a worker. That platform has no packaging
+pipeline of its own and `cargo tauri dev` remains its supported path.
+
+Two defects found in review and fixed before this block was accepted:
+
+- The wrapper located the built app at the default `src-tauri/target` path
+  regardless of `CARGO_TARGET_DIR` or a `.cargo/config.toml` override.
+  Reproduced: with the target directory redirected, it silently patched a
+  stale app left at the default path and reported success while the actual
+  new build, elsewhere, stayed workerless. It now asks `cargo metadata` for
+  the real target directory instead of assuming it.
+- Re-signing after the worker was inserted used a bare `codesign --force
+  --sign`, dropping any configured entitlements and hardened runtime -
+  settings Tauri itself applies when it first seals the bundle. The wrapper
+  now reads `bundle.macOS.entitlements` and `bundle.macOS.hardenedRuntime`
+  from `tauri.conf.json` and passes them to the re-sign.
 
 ## Block 3: Launch the bundled executable and retain supervision
 

@@ -1,5 +1,21 @@
 # Changelog
 
+## Version 0.22.0 (2026-09-18, claude opus-5)
+
+- Bundle the worker as a PyInstaller onedir distribution
+
+  Measured on macOS, worker startup drops from 6.24s to 0.45s, at 3x the
+  on-disk size. Build the app with scripts/build_macos_app.sh from now on:
+  Tauri's resource copy resolves the symlinks PyInstaller's layout relies on,
+  so the worker is inserted after bundling, verified, and re-signed.
+
+- bugfix: fix the frontend build/dev hooks failing with 'cd: app: No such file or directory'
+
+  Tauri runs beforeDevCommand/beforeBuildCommand from inside app/ already, so
+  the existing 'cd app && npm run ...' looked for a nested app/app/. Pre-dates
+  this session's changes; cargo tauri build failed outright, and cargo tauri
+  dev silently killed itself a few seconds after launch.
+
 ## Version 0.21.0 (2026-09-18, claude design, claude sonnet-5 , claude opus-5)
 
 - Redesign the batch workspace visual style

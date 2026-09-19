@@ -22,7 +22,7 @@ target/
 # Tauri
 src-tauri/target/
 src-tauri/gen/
-src-tauri/binaries/
+src-tauri/resources/
 
 # Environment
 .env
