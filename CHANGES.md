@@ -1,5 +1,13 @@
 # Changelog
 
+## Version 0.27.0 (2026-09-19, claude sonnet-5)
+
+- Add a 'Compact view' toggle that hides the field list and run details per invoice row
+
+  Status pill, editable proposed filename, missing-field/warning flags, and
+  the action buttons all stay visible when collapsed - only the
+  date/seller/product/amount list and the run-details disclosure hide.
+
 ## Version 0.26.0 (2026-09-19, claude sonnet-5)
 
 - Add a segmented progress bar showing done/queued/warnings/failed counts above the invoice list

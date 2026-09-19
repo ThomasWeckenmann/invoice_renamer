@@ -7,6 +7,7 @@ import { BatchItemRow } from "./BatchItemRow";
 interface BatchListProps {
   items: BatchItem[];
   renameOutcomes: Record<string, RenameOutcome>;
+  compact: boolean;
   onEditFilename: (id: string, filename: string) => void;
   onApprove: (id: string) => void;
   onUnapprove: (id: string) => void;
@@ -19,6 +20,7 @@ interface BatchListProps {
 export function BatchList({
   items,
   renameOutcomes,
+  compact,
   onEditFilename,
   onApprove,
   onUnapprove,
@@ -38,6 +40,7 @@ export function BatchList({
           key={item.id}
           item={item}
           renameOutcome={renameOutcomes[item.id]}
+          compact={compact}
           onEditFilename={onEditFilename}
           onApprove={onApprove}
           onUnapprove={onUnapprove}

@@ -17,6 +17,7 @@ export function BatchWorkspace() {
   // Global, not per-item: read fresh at the moment each analyze/re-run fires,
   // so toggling it and re-running an item picks up the new value immediately.
   const [shortenFields, setShortenFields] = useState(true);
+  const [compactView, setCompactView] = useState(false);
   const catalog = useModelCatalog();
   const batch = useBatchWorkspace();
   const rename = useRenameTransaction();
@@ -78,6 +79,9 @@ export function BatchWorkspace() {
           <div className="batch-workspace__toolbar-row">
             <h2>Invoices ({batch.items.length})</h2>
             <div className="batch-workspace__toolbar-actions">
+              <button type="button" className="btn sm" onClick={() => setCompactView((prev) => !prev)}>
+                {compactView ? "Full view" : "Compact view"}
+              </button>
               <label className="batch-workspace__option">
                 <input
                   type="checkbox"
@@ -100,6 +104,7 @@ export function BatchWorkspace() {
         <BatchList
           items={batch.items}
           renameOutcomes={rename.outcomes}
+          compact={compactView}
           onEditFilename={batch.editFilename}
           onApprove={batch.approveItem}
           onUnapprove={batch.unapproveItem}

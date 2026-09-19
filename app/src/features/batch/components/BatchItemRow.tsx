@@ -15,6 +15,7 @@ import { displayFilename, type BatchItem } from "../types";
 interface BatchItemRowProps {
   item: BatchItem;
   renameOutcome?: RenameOutcome;
+  compact?: boolean;
   onEditFilename: (id: string, filename: string) => void;
   onApprove: (id: string) => void;
   onUnapprove: (id: string) => void;
@@ -37,6 +38,7 @@ const STATUS_LABELS: Record<BatchItem["status"], string> = {
 export function BatchItemRow({
   item,
   renameOutcome,
+  compact = false,
   onEditFilename,
   onApprove,
   onUnapprove,
@@ -140,7 +142,7 @@ export function BatchItemRow({
             </p>
           )}
 
-          {extraction && (
+          {extraction && !compact && (
             <dl className="batch-item__fields">
               <div className="batch-item__field">
                 <dt>Date</dt>
@@ -208,7 +210,7 @@ export function BatchItemRow({
             </>
           )}
 
-          {item.metrics && (
+          {item.metrics && !compact && (
             <details className="batch-item__metrics">
               <summary>
                 <span className="batch-item__metrics-label">Run details</span>
