@@ -1,5 +1,15 @@
 # Changelog
 
+## Version 0.33.3 (2026-09-20, claude sonnet-5)
+
+- bugfix: flag a truncated proposed filename for review instead of silently cutting it
+
+  A long seller/product value (from XML or the model) that overflowed the
+  150-character filename limit was hard-truncated mid-word with no warning
+  and no review flag. `FilenameProposal` now carries its own `warnings`
+  list, distinct from extraction warnings, and truncation sets
+  `requires_review=True` with a stated reason shown in the app.
+
 ## Version 0.33.2 (2026-09-20, claude sonnet-5)
 
 - bugfix: combine the top 2 XML line items into product_summary when neither dominates

@@ -60,6 +60,7 @@ function reviewItem(overrides: Partial<BatchItem> = {}): BatchItem {
       proposed_filename: "2026-01-05_Acme_Widget_42-EUR.pdf",
       requires_review: false,
       missing_fields: [],
+      warnings: [],
     },
     editedFilename: null,
     metrics: null,
@@ -95,6 +96,47 @@ describe("BatchItemRow", () => {
     );
 
     expect(screen.getByRole("status")).toHaveTextContent("currently free");
+  });
+
+  it("shows a proposal-level warning (e.g. filename truncation) alongside extraction warnings", () => {
+    render(
+      <ul>
+        <BatchItemRow
+          item={reviewItem({
+            proposal: {
+              extraction: {
+                invoice_date: "2026-01-05",
+                seller: "Acme",
+                product_summary: "Widget",
+                seller_short: null,
+                product_summary_short: null,
+                gross_total: "42.00",
+                currency: "EUR",
+                language: "en",
+                evidence: {},
+                warnings: ["extraction warning"],
+              },
+              proposed_filename: "2026-01-05_Acme_Widget_42-EUR.pdf",
+              requires_review: true,
+              missing_fields: [],
+              warnings: ["product truncated to fit the 150-character filename limit"],
+            },
+          })}
+          onEditFilename={noop}
+          onApprove={noop}
+          onUnapprove={noop}
+          onCancel={noop}
+          onAnalyze={noop}
+          canAnalyze={true}
+          onRemove={noop}
+        />
+      </ul>,
+    );
+
+    expect(screen.getByText("extraction warning")).toBeInTheDocument();
+    expect(
+      screen.getByText("product truncated to fit the 150-character filename limit"),
+    ).toBeInTheDocument();
   });
 
   it("renders no memory warning when the job has none", () => {
@@ -220,6 +262,7 @@ describe("BatchItemRow", () => {
               proposed_filename: "2026-01-15_Beispiel-GmbH_Cloud-Hosting_595-EUR.pdf",
               requires_review: false,
               missing_fields: [],
+              warnings: [],
             },
             metrics: runMetrics({
               total_ms: 5,
@@ -322,6 +365,7 @@ describe("BatchItemRow", () => {
               proposed_filename: "2026-01-05_Amazon_Galaxy-Projektor_42-EUR.pdf",
               requires_review: false,
               missing_fields: [],
+              warnings: [],
             },
           })}
           onEditFilename={noop}

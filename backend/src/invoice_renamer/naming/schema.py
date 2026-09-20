@@ -12,3 +12,7 @@ class FilenameProposal(BaseModel):
     # Which of date/seller/product/amount/currency were missing, kept distinct from
     # extraction.warnings so the UI can explain why requires_review is true.
     missing_fields: list[str] = Field(default_factory=list)
+    # Filename-generation warnings (e.g. truncation), kept distinct from
+    # extraction.warnings since they describe the proposed name, not the
+    # extracted data - both sources feed requires_review.
+    warnings: list[str] = Field(default_factory=list)

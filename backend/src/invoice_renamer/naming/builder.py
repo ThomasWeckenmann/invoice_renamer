@@ -72,6 +72,21 @@ def _round_amount(value: Decimal | None) -> tuple[str, bool]:
     return str(rounded), False
 
 
+def _truncated_fields(
+    date_part: str, seller_part: str, product_part: str, max_prefix_length: int
+) -> list[str]:
+    """Which of date/seller/product survive only partially, or not at all, once
+    the combined prefix is cut to max_prefix_length - assumes truncation is
+    already known to happen (the caller checks the untruncated length first)."""
+    date_end = len(date_part)
+    seller_end = date_end + 1 + len(seller_part)
+    if max_prefix_length >= seller_end:
+        return ["product"]
+    if max_prefix_length >= date_end:
+        return ["seller", "product"]
+    return ["date", "seller", "product"]
+
+
 def build_filename_proposal(extraction: InvoiceExtraction) -> FilenameProposal:
     date_part, date_missing = _format_date(extraction.invoice_date)
     seller_part, seller_missing = _normalize_segment(extraction.seller_short or extraction.seller)
@@ -88,7 +103,13 @@ def build_filename_proposal(extraction: InvoiceExtraction) -> FilenameProposal:
     suffix = f"_{amount_part}-{currency_part}"
     prefix = f"{date_part}_{seller_part}_{product_part}"
     max_prefix_length = max(0, _MAX_STEM_LENGTH - len(suffix))
+    warnings: list[str] = []
     if len(prefix) > max_prefix_length:
+        truncated = _truncated_fields(date_part, seller_part, product_part, max_prefix_length)
+        warnings.append(
+            f"{'/'.join(truncated)} truncated to fit the {_MAX_STEM_LENGTH}-character "
+            "filename limit"
+        )
         prefix = prefix[:max_prefix_length].rstrip("_-")
 
     stem = f"{prefix}{suffix}"
@@ -104,11 +125,12 @@ def build_filename_proposal(extraction: InvoiceExtraction) -> FilenameProposal:
         )
         if missing
     ]
-    requires_review = bool(missing_fields) or bool(extraction.warnings)
+    requires_review = bool(missing_fields) or bool(extraction.warnings) or bool(warnings)
 
     return FilenameProposal(
         extraction=extraction,
         proposed_filename=f"{stem}.pdf",
         requires_review=requires_review,
         missing_fields=missing_fields,
+        warnings=warnings,
     )

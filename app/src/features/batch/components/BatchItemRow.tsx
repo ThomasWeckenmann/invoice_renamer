@@ -53,6 +53,10 @@ export function BatchItemRow({
   onRemove,
 }: BatchItemRowProps) {
   const { extraction } = item.proposal ?? { extraction: null };
+  // Extraction warnings (about the invoice data) and proposal warnings (about
+  // the generated filename itself, e.g. truncation) are separate sources on
+  // the backend but shown together - both are reasons to review before approving.
+  const allWarnings = [...(extraction?.warnings ?? []), ...(item.proposal?.warnings ?? [])];
   const canReview = item.status === "needs_review" || item.status === "approved";
   const isRenamed = renameOutcome?.status === "renamed";
   // The backend attaches a memory pre-flight warning to the job at submit
@@ -235,13 +239,13 @@ export function BatchItemRow({
             </p>
           )}
 
-          {extraction && extraction.warnings.length > 0 && (
+          {allWarnings.length > 0 && (
             <>
               <p className="batch-item__flag" role="status">
                 Review the warnings below before approving.
               </p>
               <ul className="batch-item__warnings">
-                {extraction.warnings.map((warning) => (
+                {allWarnings.map((warning) => (
                   <li key={warning}>{warning}</li>
                 ))}
               </ul>

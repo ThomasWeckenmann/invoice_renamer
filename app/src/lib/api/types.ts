@@ -26,6 +26,10 @@ export interface FilenameProposal {
   proposed_filename: string;
   requires_review: boolean;
   missing_fields: string[];
+  // Filename-generation warnings (e.g. truncation), kept distinct from
+  // extraction.warnings since they describe the proposed name, not the
+  // extracted data.
+  warnings: string[];
 }
 
 export type ExtractionSource = "xml" | "xml_and_model" | "model";

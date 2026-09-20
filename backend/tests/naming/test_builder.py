@@ -25,6 +25,7 @@ def test_full_extraction_produces_expected_filename() -> None:
     assert proposal.proposed_filename == "2026-09-12_Apple_MacBook-Air_2180-EUR.pdf"
     assert proposal.requires_review is False
     assert proposal.missing_fields == []
+    assert proposal.warnings == []
 
 
 def test_missing_date_uses_placeholder_and_requires_review() -> None:
@@ -136,3 +137,20 @@ def test_long_product_summary_is_truncated_without_losing_amount_or_currency() -
     assert len(stem) <= 150
     # The amount/currency suffix must survive truncation, not just overall length.
     assert stem.endswith("_2180-EUR")
+    # Truncation must never be silent: flagged for review with a stated reason.
+    assert proposal.requires_review is True
+    assert len(proposal.warnings) == 1
+    assert "product" in proposal.warnings[0]
+    assert "truncated" in proposal.warnings[0]
+
+
+def test_extremely_long_seller_truncates_seller_and_product_both() -> None:
+    proposal = build_filename_proposal(_extraction(seller="Word " * 60, product_summary="Short"))
+
+    stem = proposal.proposed_filename.removesuffix(".pdf")
+    assert len(stem) <= 150
+    assert stem.endswith("_2180-EUR")
+    assert proposal.requires_review is True
+    assert len(proposal.warnings) == 1
+    assert "seller" in proposal.warnings[0]
+    assert "product" in proposal.warnings[0]

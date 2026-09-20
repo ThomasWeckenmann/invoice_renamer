@@ -1,6 +1,8 @@
 # Extraction fallback fixes
 
-Status: Block 1 complete and verified (pytest/ruff/mypy). Blocks 2-5 not started.
+Status: Blocks 1-2 complete and verified (pytest/ruff/mypy; frontend tsc/eslint
+clean, vitest needs the developer's machine - see Block 2's note). Blocks 3-5
+not started.
 
 ## Goal
 
@@ -243,6 +245,39 @@ Acceptance: any filename whose date/seller/product prefix is actually
 truncated to fit the stem limit is flagged for review with a visible
 reason, regardless of whether the long value came from XML or the model;
 proposals that don't truncate are unaffected.
+
+### Block 2 accepted, 2026-09-20
+
+Implemented: `FilenameProposal.warnings` (`naming/schema.py`), distinct
+from `extraction.warnings`. `naming/builder.py:build_filename_proposal`
+now detects the existing `len(prefix) > max_prefix_length` truncation
+branch, appends a bounded warning naming which of date/seller/product
+survive only partially (via a new `_truncated_fields` helper that compares
+`max_prefix_length` against each segment's boundary - never echoes the
+full pre-truncation text), and folds it into `requires_review`. General,
+not XML-specific: exercised with both a long product alone (product-only
+truncation) and a long seller alone (seller+product truncation, since
+product is pushed out entirely) in
+`backend/tests/naming/test_builder.py`.
+Mirrored in `app/src/lib/api/types.ts`; `BatchItemRow.tsx` now merges
+`extraction.warnings` and `proposal.warnings` into one list before
+rendering the existing "Review the warnings below" section, so both
+sources show up together without either clobbering the other. All
+`FilenameProposal` test fixtures across the frontend suite updated for the
+new required field; new component test asserts both an extraction warning
+and a proposal warning render together.
+Verified against the real `xml-issue-02-dominance-fallback.pdf`: its
+previously-silent truncation now comes back `requires_review=True` with
+warning `'product truncated to fit the 150-character filename limit'`.
+Backend `pytest` (368 passed, 2 pre-existing platform skips), `ruff format
+--check`, `ruff check`, and `mypy src` (strict) all pass with zero
+findings. Frontend `tsc --noEmit` and `eslint .` both clean. Frontend
+`vitest` could not run in this sandbox (`app/node_modules` is synced to
+the developer's real Mac over virtiofs and is missing the Linux-only
+`@rollup/rollup-linux-arm64-gnu` optional dependency - the same
+pre-existing gap noted in plan 05's Block 5); the developer needs to run
+`npm run test` on their own machine to confirm the new component test and
+updated fixtures pass.
 
 ## Block 3: Field-level salvage for model extraction validation
 

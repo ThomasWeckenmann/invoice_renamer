@@ -71,6 +71,7 @@ describe("useBatchWorkspace", () => {
           proposed_filename: "2026-01-05_Acme_Widget_42-EUR.pdf",
           requires_review: false,
           missing_fields: [],
+          warnings: [],
         },
         metrics: null,
       }),
