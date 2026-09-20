@@ -1,8 +1,7 @@
 """Finds and classifies an embedded ZUGFeRD/Factur-X invoice XML attachment in a PDF,
 without reading page text, running OCR, or mapping any field values.
 
-Supported format matrix (first implementation - see docs/plans_open/05_zugferd-extraction.md
-for the verification this matrix was checked against): CII (UN/CEFACT Cross Industry
+Supported format matrix: CII (UN/CEFACT Cross Industry
 Invoice) D16B as embedded by Factur-X 1.0 / ZUGFeRD 2.x, root element
 {urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100}CrossIndustryInvoice, EN16931
 ("COMFORT") profile only (urn:cen.eu:en16931:2017). MINIMUM, BASIC WL, BASIC, EXTENDED,

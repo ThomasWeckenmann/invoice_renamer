@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 0.35.0 (2026-09-20, claude sonnet-5)
+
+- Add a live memory status display and persistent model size/description details
+
+  A new GET /memory endpoint reports system/worker/GPU memory, polled by a
+  MemoryStatus indicator kept visible outside the Model section's collapse.
+  Replaces the old submission-time memory_warning/estimated_memory_gb
+  pre-flight check. Model rows now always show download size and description.
+
 ## Version 0.34.0 (2026-09-20, claude sonnet-5)
 
 - Add an AI-calls inspector and make the model's repair/retry prompts narrower and more accurate

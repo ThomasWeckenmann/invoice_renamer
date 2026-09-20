@@ -38,7 +38,6 @@ function approvedItem(overrides: Partial<BatchItem> = {}): BatchItem {
     },
     editedFilename: null,
     metrics: null,
-    memoryWarning: null,
     error: null,
     ...overrides,
   };

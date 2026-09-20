@@ -1,7 +1,7 @@
 /** Model picker: list of local models with install status, download/remove
  * controls, and selection for the active batch run. */
 
-import { formatBytes } from "../../../lib/format";
+import { formatDecimalGB } from "../../../lib/format";
 import type { ModelStatusEntry } from "../../../lib/api/types";
 
 interface ModelSelectorProps {
@@ -29,6 +29,7 @@ function ModelRow({
   onRemove: () => void;
 }) {
   const { entry, status } = model;
+  const totalBytes = entry.files.reduce((sum, file) => sum + file.size_bytes, 0);
 
   return (
     <div className="model-row" data-status={status}>
@@ -46,9 +47,6 @@ function ModelRow({
       {status === "not_installed" && (
         <button type="button" className="btn sm" onClick={onDownload} disabled={!model.compatible}>
           Download
-          {entry.files.length > 0
-            ? ` (${formatBytes(entry.files.reduce((sum, file) => sum + file.size_bytes, 0))})`
-            : ""}
         </button>
       )}
       {status === "downloading" && (
@@ -70,6 +68,11 @@ function ModelRow({
           Remove
         </button>
       )}
+
+      <div className="model-row__meta">
+        {entry.description && <span className="model-row__description">{entry.description}</span>}
+        <span className="model-row__size">{formatDecimalGB(totalBytes)} download</span>
+      </div>
 
       {!model.compatible && model.compatibility_reasons.length > 0 && (
         <ul className="model-row__reasons">

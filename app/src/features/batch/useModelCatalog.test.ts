@@ -20,7 +20,7 @@ function makeEntry(overrides: Partial<ModelStatusEntry> = {}): ModelStatusEntry 
       files: [{ path: "model.safetensors", sha256: "x", size_bytes: 1000 }],
       memory_tier: "medium",
       prompt_template: null,
-      estimated_memory_gb: null,
+      description: null,
     },
     status: "not_installed",
     compatible: true,

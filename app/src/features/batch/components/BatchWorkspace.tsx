@@ -11,6 +11,7 @@ import { BatchList } from "./BatchList";
 import { BatchProgressBar } from "./BatchProgressBar";
 import { ImportDropzone } from "./ImportDropzone";
 import { CheckIcon, EyeIcon, FilterIcon, SparkleIcon } from "./icons";
+import { MemoryStatus } from "./MemoryStatus";
 import { ModelSelector } from "./ModelSelector";
 import { UndoConfirmDialog } from "./UndoConfirmDialog";
 
@@ -98,6 +99,7 @@ export function BatchWorkspace() {
         <div className="batch-section__header">
           <h2>Model</h2>
           <div className="batch-section__header-end">
+            <MemoryStatus />
             {modelsCollapsed && (
               <span className="batch-section__header-note">
                 {selectedModel ? selectedModel.entry.display_name : "None selected"}

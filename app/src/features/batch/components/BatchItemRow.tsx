@@ -60,11 +60,6 @@ export function BatchItemRow({
   const allWarnings = [...(extraction?.warnings ?? []), ...(item.proposal?.warnings ?? [])];
   const canReview = item.status === "needs_review" || item.status === "approved";
   const isRenamed = renameOutcome?.status === "renamed";
-  // The backend attaches a memory pre-flight warning to the job at submit
-  // time and never clears it, so it's still there in the final poll
-  // response - stale advice once the run has moved past queued/running.
-  const showMemoryWarning =
-    item.memoryWarning !== null && (item.status === "queued" || item.status === "running");
   // Every state except a job already in flight, which offers Cancel instead.
   const showAnalyze = !isRenamed && item.status !== "queued" && item.status !== "running";
   const [openError, setOpenError] = useState<string | null>(null);
@@ -162,12 +157,6 @@ export function BatchItemRow({
           </span>
         )}
       </div>
-
-      {showMemoryWarning && (
-        <p className="batch-item__memory-warning" role="status">
-          {item.memoryWarning}
-        </p>
-      )}
 
       {canReview && item.proposal && (
         <div className="batch-item__review">

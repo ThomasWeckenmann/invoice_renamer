@@ -78,7 +78,6 @@ export interface AnalysisJobView {
   proposal: FilenameProposal | null;
   metrics: RunMetrics | null;
   error: string | null;
-  memory_warning: string | null;
 }
 
 export type MemoryTier = "small" | "medium" | "large";
@@ -98,7 +97,7 @@ export interface ModelCatalogEntry {
   files: ModelFile[];
   memory_tier: MemoryTier;
   prompt_template: string | null;
-  estimated_memory_gb: number | null;
+  description: string | null;
 }
 
 export type InstallStatus = "not_installed" | "downloading" | "installed" | "verification_failed";
@@ -119,4 +118,21 @@ export interface SystemCapabilities {
   acceleration: AccelerationBackend;
   memory_gb: number;
   free_disk_gb: number;
+}
+
+export interface GpuMemorySnapshot {
+  backend: string;
+  allocated_bytes: number | null;
+  reserved_bytes: number | null;
+  driver_allocated_bytes: number | null;
+}
+
+export interface MemorySnapshot {
+  sampled_at: number;
+  system_total_bytes: number;
+  system_available_bytes: number;
+  worker_rss_bytes: number;
+  runtime_device: string | null;
+  gpu: GpuMemorySnapshot | null;
+  gpu_error: string | null;
 }

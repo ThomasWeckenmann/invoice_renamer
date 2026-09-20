@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from invoice_renamer.api.analyses_routes import AnalysisCoordinator, analyses_router
 from invoice_renamer.api.auth import require_session_token
+from invoice_renamer.api.memory_routes import memory_router
 from invoice_renamer.api.models_routes import ModelInstallCoordinator, models_router
 from invoice_renamer.models.installer import resolve_data_dir
 
@@ -39,6 +40,7 @@ def create_app() -> FastAPI:
     app.state.analysis_coordinator = AnalysisCoordinator(data_dir)
     app.include_router(models_router)
     app.include_router(analyses_router)
+    app.include_router(memory_router)
 
     @app.get("/health")
     def health() -> dict[str, str]:

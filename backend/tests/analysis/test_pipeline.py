@@ -520,10 +520,10 @@ class _CountingModel:
 def test_happy_path_crosses_combination_truncation_and_salvage_together() -> None:
     # The end-to-end case tying all three fixes together: XML combines two
     # non-dominant items into a product name long enough to force filename
-    # truncation (Block 1 + 2), XML has no seller so the model still runs
-    # (fallback), and the model's only mistake is an invalid currency, which
-    # must be salvaged rather than discarding its otherwise-good seller
-    # (Block 3) - while XML still wins for every field it actually supplies.
+    # truncation, XML has no seller so the model still runs (fallback), and
+    # the model's only mistake is an invalid currency, which must be salvaged
+    # rather than discarding its otherwise-good seller - while XML still
+    # wins for every field it actually supplies.
     pdf_bytes = (FIXTURES_DIR / "with_zugferd_xml_combine_truncates_no_seller.pdf").read_bytes()
     model_response = _valid_model_response(
         seller="Model Seller",
@@ -542,17 +542,17 @@ def test_happy_path_crosses_combination_truncation_and_salvage_together() -> Non
         shorten_enabled=False,
     )
 
-    # Seller survives salvage (Block 3) - XML never supplied one.
+    # Seller survives salvage - XML never supplied one.
     assert proposal.extraction.seller == "Model Seller"
     # XML wins for every field it actually supplies, ignoring the model's
-    # conflicting guesses (Block 1).
+    # conflicting guesses.
     assert proposal.extraction.invoice_date.isoformat() == "2026-01-15"
     assert str(proposal.extraction.gross_total) == "595.00"
     assert proposal.extraction.currency == "EUR"
     assert proposal.extraction.product_summary is not None
     assert proposal.extraction.product_summary.startswith("X" * 90)
-    # Block 2's truncation warning and Block 3's salvage warning both survive
-    # together, neither clobbering the other.
+    # The truncation warning and the salvage warning both survive together,
+    # neither clobbering the other.
     assert proposal.requires_review is True
     assert any("truncated" in warning for warning in proposal.warnings)
     assert any("currency" in warning for warning in proposal.extraction.warnings)

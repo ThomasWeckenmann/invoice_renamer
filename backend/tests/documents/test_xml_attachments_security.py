@@ -1,7 +1,6 @@
-"""Security/sanity tests for embedded invoice XML handling, per
-docs/plans_open/05_zugferd-extraction.md Block 6: attachment names and XML are
-untrusted input, and hostile or oversized payloads must have bounded, visible
-outcomes rather than crashing an otherwise readable PDF batch.
+"""Security/sanity tests for embedded invoice XML handling: attachment names
+and XML are untrusted input, and hostile or oversized payloads must have
+bounded, visible outcomes rather than crashing an otherwise readable PDF batch.
 """
 
 import time

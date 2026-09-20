@@ -1,5 +1,5 @@
 """Tests for embedded invoice XML discovery and classification - no page text, OCR,
-or field mapping involved, per docs/plans_open/05_zugferd-extraction.md Block 1.
+or field mapping involved.
 """
 
 from pathlib import Path

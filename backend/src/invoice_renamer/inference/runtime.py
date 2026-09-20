@@ -5,6 +5,7 @@ same model don't reload multi-GB weights per request.
 from __future__ import annotations
 
 import gc
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
@@ -13,6 +14,17 @@ from invoice_renamer.models.catalog import ModelCatalogEntry
 
 if TYPE_CHECKING:
     from invoice_renamer.inference.transformers_extractor import TransformersExtractor
+
+
+@dataclass(frozen=True)
+class RuntimeSnapshot:
+    """Small immutable copy of ModelRuntime's state for a request handler (e.g.
+    the memory sampler) to read without touching the extractor itself or
+    taking any lock."""
+
+    loaded_entry_id: str | None
+    device: str | None
+
 
 _DEVICE_BY_BACKEND = {
     AccelerationBackend.MPS: "mps",
@@ -64,21 +76,16 @@ class LoadInstalledFn(Protocol):
 
 class ModelRuntime:
     """Not thread-safe by design: only the analysis worker thread (one thread,
-    one job at a time) ever calls get_or_load()/mark_warmed(), so no internal
-    lock is needed. loaded_entry_id() and is_warmed() are the exceptions - plain
+    one job at a time) ever calls get_or_load(), so no internal lock is
+    needed. loaded_entry_id() and snapshot() are the exceptions - plain
     attribute reads safe to call from another thread (e.g. a request handler
-    checking what's resident for a pre-flight estimate) since a snapshot that's
-    a call away from stale is already the expected shape of that kind of check."""
+    sampling live memory) since a snapshot that's a call away from stale is
+    already the expected shape of that kind of check."""
 
     def __init__(self, *, load_installed: LoadInstalledFn | None = None) -> None:
         self._loaded: tuple[str, str | None] | None = None
         self._extractor: TransformersExtractor | None = None
-        # True once the currently loaded model has completed at least one
-        # generate() call. A model's measured memory footprint (used to credit
-        # pre-flight checks - see analyses_routes.py) reflects steady-state
-        # inference, not just its freshly-loaded weights, so callers should
-        # not treat that figure as trustworthy until this is true.
-        self._warmed = False
+        self._device: str | None = None
         # Lazily resolved (not a bound default argument) so tests can
         # monkeypatch TransformersExtractor.load_installed after construction,
         # same pattern as installer.py's FetchFn.
@@ -88,16 +95,10 @@ class ModelRuntime:
         """The id of the currently cached model, or None if nothing is loaded."""
         return self._loaded[0] if self._loaded is not None else None
 
-    def is_warmed(self) -> bool:
-        """Whether the currently loaded model has completed at least one
-        generate() call."""
-        return self._warmed
-
-    def mark_warmed(self) -> None:
-        """Records that the currently loaded model has finished a successful
-        inference call. Call only from the worker thread, right after a job
-        using it completes."""
-        self._warmed = True
+    def snapshot(self) -> RuntimeSnapshot:
+        """Small immutable copy of what's currently loaded, safe to read from
+        another thread (see class docstring)."""
+        return RuntimeSnapshot(loaded_entry_id=self.loaded_entry_id(), device=self._device)
 
     def get_or_load(
         self, entry: ModelCatalogEntry, data_dir: Path, device: str
@@ -114,6 +115,7 @@ class ModelRuntime:
             load_installed = TransformersExtractor.load_installed
         self._extractor = load_installed(entry, data_dir, device=device)
         self._loaded = key
+        self._device = device
         return self._extractor
 
     def _unload_current(self) -> None:
@@ -124,7 +126,7 @@ class ModelRuntime:
         del self._extractor
         self._extractor = None
         self._loaded = None
-        self._warmed = False
+        self._device = None
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()

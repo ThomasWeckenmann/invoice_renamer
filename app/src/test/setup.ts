@@ -11,6 +11,15 @@ afterEach(() => {
   cleanup();
 });
 
+// jsdom doesn't implement <dialog> behavior (it requires layout jsdom
+// doesn't do), so every component using showModal()/close() needs this.
+HTMLDialogElement.prototype.showModal = function () {
+  this.open = true;
+};
+HTMLDialogElement.prototype.close = function () {
+  this.open = false;
+};
+
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn().mockRejectedValue(new Error("no Tauri runtime in tests")),
 }));

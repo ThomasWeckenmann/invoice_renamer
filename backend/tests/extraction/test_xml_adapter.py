@@ -1,5 +1,5 @@
 """Tests for mapping a supported CII invoice XML candidate into InvoiceExtraction
-fields, per docs/plans_open/05_zugferd-extraction.md Block 2.
+fields.
 """
 
 from datetime import date

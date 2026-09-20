@@ -6,12 +6,11 @@ export function basename(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
 }
 
-export function formatBytes(bytes: number): string {
-  if (bytes <= 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB"];
-  const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
-  const value = bytes / 1024 ** exponent;
-  return `${exponent === 0 ? value : value.toFixed(1)} ${units[exponent]}`;
+// Decimal GB (1 GB = 10^9 bytes), not the 1024-based convention some UIs
+// label "GB" - used for model download sizes and live memory figures, where
+// that distinction actually matters at multi-GB scale.
+export function formatDecimalGB(bytes: number): string {
+  return `${(bytes / 1_000_000_000).toFixed(1)} GB`;
 }
 
 export function formatAmount(amount: string | null, currency: string | null): string {
