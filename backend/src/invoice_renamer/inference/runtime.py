@@ -25,7 +25,28 @@ _DEVICE_BY_BACKEND = {
 
 
 def select_device(capabilities: SystemCapabilities) -> str:
-    return _DEVICE_BY_BACKEND[capabilities.acceleration]
+    """Maps detected capabilities to a torch device string, confirmed against
+    torch itself before it is used.
+
+    Capability detection is deliberately torch-free so listing models stays
+    cheap at startup, which means it can only infer an accelerator from the
+    host (an `nvidia-smi` on PATH, Apple Silicon). That says nothing about the
+    installed torch wheel: a CPU-only build on a CUDA host would otherwise be
+    handed "cuda" here and fail at load. This runs immediately before loading a
+    model, where torch is imported anyway, so asking it directly costs nothing
+    and downgrading to CPU is always safe.
+    """
+    device = _DEVICE_BY_BACKEND[capabilities.acceleration]
+    if device == "cpu":
+        return device
+
+    import torch
+
+    if device == "cuda" and torch.cuda.is_available():
+        return device
+    if device == "mps" and torch.backends.mps.is_available():
+        return device
+    return "cpu"
 
 
 class LoadInstalledFn(Protocol):

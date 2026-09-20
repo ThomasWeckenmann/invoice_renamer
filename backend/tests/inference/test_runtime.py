@@ -4,6 +4,7 @@ import weakref
 from pathlib import Path
 
 import pytest
+import torch
 
 from invoice_renamer.inference.runtime import ModelRuntime, select_device
 from invoice_renamer.inference.transformers_extractor import TransformersExtractor
@@ -170,6 +171,15 @@ def test_default_loader_resolves_to_transformers_extractor_load_installed(
     assert captured == {"entry": entry, "data_dir": tmp_path, "device": "cpu"}
 
 
+def _capabilities(backend: AccelerationBackend) -> SystemCapabilities:
+    return SystemCapabilities(acceleration=backend, memory_gb=16, free_disk_gb=100)
+
+
+def _set_torch_availability(monkeypatch: pytest.MonkeyPatch, *, cuda: bool, mps: bool) -> None:
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: cuda)
+    monkeypatch.setattr(torch.backends.mps, "is_available", lambda: mps)
+
+
 @pytest.mark.parametrize(
     "backend,expected_device",
     [
@@ -179,9 +189,39 @@ def test_default_loader_resolves_to_transformers_extractor_load_installed(
         (AccelerationBackend.CPU, "cpu"),
     ],
 )
-def test_select_device_maps_every_backend(
-    backend: AccelerationBackend, expected_device: str
+def test_select_device_maps_every_backend_torch_supports(
+    backend: AccelerationBackend, expected_device: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    capabilities = SystemCapabilities(acceleration=backend, memory_gb=16, free_disk_gb=100)
+    _set_torch_availability(monkeypatch, cuda=True, mps=True)
 
-    assert select_device(capabilities) == expected_device
+    assert select_device(_capabilities(backend)) == expected_device
+
+
+@pytest.mark.parametrize(
+    "backend",
+    [AccelerationBackend.MPS, AccelerationBackend.CUDA, AccelerationBackend.ROCM],
+)
+def test_select_device_downgrades_to_cpu_when_torch_cannot_use_the_accelerator(
+    backend: AccelerationBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Detection only sees the host's hardware, so a CPU-only torch wheel on a
+    machine with an accelerator present must not be handed a device it would
+    then fail to load onto."""
+    _set_torch_availability(monkeypatch, cuda=False, mps=False)
+
+    assert select_device(_capabilities(backend)) == "cpu"
+
+
+def test_select_device_does_not_consult_torch_for_a_cpu_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A CPU capability needs no confirmation - checking anyway would import
+    torch on hosts that never load a model."""
+
+    def fail() -> bool:
+        raise AssertionError("torch availability must not be probed for a CPU host")
+
+    monkeypatch.setattr(torch.cuda, "is_available", fail)
+    monkeypatch.setattr(torch.backends.mps, "is_available", fail)
+
+    assert select_device(_capabilities(AccelerationBackend.CPU)) == "cpu"

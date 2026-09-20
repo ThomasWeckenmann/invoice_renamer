@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 0.33.1 (2026-09-20, claude opus-5)
+
+- bugfix: confirm the detected accelerator against torch before selecting a device
+
+  Capability detection only sniffs the host (nvidia-smi on PATH, Apple
+  Silicon), so a CPU-only torch wheel on a CUDA machine was handed 'cuda'
+  and failed at model load. select_device now asks torch and falls back to
+  CPU. Also corrects stale docs on detection and the auto-selected model.
+
 ## Version 0.33.0 (2026-09-20, claude sonnet-5)
 
 - Let Undo target any past rename batch, and add a matching Redo

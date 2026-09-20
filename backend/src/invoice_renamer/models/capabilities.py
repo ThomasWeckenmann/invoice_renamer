@@ -1,7 +1,6 @@
 """The detected host's hardware shape, used to judge model compatibility.
 
-Actual detection (probing memory/disk/acceleration backend) isn't built yet;
-this is only the data shape that detection will eventually produce.
+Only the data shape lives here; `detection.py` does the probing that fills it.
 """
 
 import math

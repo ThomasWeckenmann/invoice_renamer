@@ -46,7 +46,7 @@ From a clone of this repository:
    cargo tauri dev
    ```
 
-On first launch, use the model manager in the app to download a local model (e.g. Granite-3.3-2B-Instruct) before analyzing invoices — no model is bundled or downloaded automatically.
+On first launch, use the model manager in the app to download a local model before analyzing invoices — no model is bundled or downloaded automatically. Two are offered: **Qwen3-0.6B**, which the app selects automatically once it is installed, and **Granite-3.3-2B-Instruct**, which is slower (~16-18s vs ~5-12s per invoice) but noticeably more accurate on amounts and dates. Pick Granite in the Model panel if a proposed filename has to be right more often than it has to be fast; see `docs/model_benchmark_findings.md` for the measured difference.
 
 Re-run step 1 after changing backend (Python) code — the worker is a separate build artifact and isn't rebuilt automatically by `cargo tauri dev`. It's built for the machine you build it on, and the Tauri build refuses to package a worker built for a different architecture.
 
