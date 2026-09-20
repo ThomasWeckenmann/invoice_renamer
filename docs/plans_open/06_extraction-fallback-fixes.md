@@ -1,7 +1,7 @@
 # Extraction fallback fixes
 
-Status: Blocks 1-2 complete and verified (pytest/ruff/mypy; frontend tsc/eslint
-clean, vitest needs the developer's machine - see Block 2's note). Blocks 3-5
+Status: Blocks 1-3 complete and verified (pytest/ruff/mypy; frontend tsc/eslint
+clean, vitest needs the developer's machine - see Block 2's note). Blocks 4-5
 not started.
 
 ## Goal
@@ -313,9 +313,12 @@ updated fixtures pass.
 - Apply the same salvage step to the repaired response inside the retry
   loop too, not just the first attempt - a repair retry can introduce a new
   single-field mistake just as easily as the original response.
-- Update the existing schema-violation repair test to expect immediate
-  currency salvage without a repair call. Add unit tests for one and
-  multiple bad fields; invalid language; malformed/nested evidence;
+- Update the existing schema-violation repair test to expect currency
+  salvage to survive a repair attempt (the model still gets one retry to
+  supply the missing field - see this block's later revision below - and
+  the salvaged result wins only once that retry doesn't do better). Add
+  unit tests for one and multiple bad fields; invalid language;
+  malformed/nested evidence;
   document plus salvage warning preservation; warning deduplication and
   bounds; and continued exclusion of model warnings and short fields.
 - Cover malformed JSON plus arrays, strings, numbers, booleans, and `null`
@@ -338,10 +341,186 @@ updated fixtures pass.
   actually got them right.
 
 Acceptance: a salvageable response preserves valid fields and both warning
-sources without a repair call. Non-nullable rejected fields use schema
-defaults; non-object JSON cannot crash extraction; rejected responses with
-no useful filename fields still attempt repair and report terminal failure
-if repair cannot recover them.
+sources, and still gets one repair attempt to recover the dropped field
+before the salvaged result is accepted (see this block's later revision).
+Non-nullable rejected fields use schema defaults; non-object JSON cannot
+crash extraction; rejected responses with no useful filename fields still
+attempt repair and report terminal failure if repair cannot recover them.
+
+### Block 3 accepted, 2026-09-20
+
+Implemented in `inference/extractor.py`: `_parse` tries
+`InvoiceExtraction.model_validate` first, and on `ValidationError` calls a
+new `_salvage(data, error)`. It maps each error's `loc[0]` against the
+7 eligible top-level fields (`invoice_date`, `seller`, `product_summary`,
+`gross_total`, `currency`, `language`, `evidence` - the only ones
+model-supplied JSON can actually populate, since `warnings`/`seller_short`/
+`product_summary_short` are already stripped before validation ever runs);
+any error outside that set (including root-level `loc=()` for non-dict
+JSON) re-raises immediately for the existing repair loop, never indexing
+`loc[0]` blindly. Rejected field names are deduplicated via dict
+`setdefault` (so multiple nested `evidence` errors collapse to one
+warning), removed from a copy of the sanitized dict, and re-validated -
+restoring schema defaults (`None`, `Language.UNKNOWN`, `{}`). A result
+only counts as salvaged if at least one of the 5 filename fields (not
+language/evidence alone) survives with a non-null, non-blank value;
+otherwise the original error is re-raised so repair can still recover it.
+Each dropped field gets one warning, `field: message` truncated to 50
+chars + `...`, built only from pydantic's own `msg` (never `input`/`ctx`/
+the raw response). `extract_invoice`'s success return now merges
+`document.warnings` with `extraction.warnings` instead of overwriting the
+latter, fixing the bug that would have silently discarded salvage warnings
+on every successful extraction. Because salvage lives inside `_parse`,
+which the retry loop already calls on every attempt including repaired
+responses, no separate wiring was needed to apply it there too.
+31 tests in `tests/inference/test_extractor.py` (17 new, 1 rewritten): the
+existing schema-violation-repair test now expects immediate salvage with
+no repair call; new tests cover multiple simultaneous bad fields, invalid
+language, malformed/nested evidence (single and deduplicated-multiple),
+document+salvage warning coexistence, message truncation (a real
+61-character pydantic message from an unrecognized-but-well-formed
+currency code), all 5 filename fields invalid (repair triggers, then the
+repeated-failure terminal marker), the boundary where exactly one filename
+field survives (salvages) versus survives-but-blank (`"   "`, does not
+count - repair triggers), an already-valid all-null response needing no
+salvage, all 5 non-object JSON shapes (array/string/number/bool/null,
+parametrized) skipping salvage and going straight to repair - including
+zero-repair-attempts failing fast - and a malformed-then-salvageable
+repair sequence proving salvage isn't limited to the first attempt.
+Verified against the real captured raw responses from
+`model-validation-error_01.pdf` and `_02.pdf` (fed directly through
+`_parse`, since reproducing the actual small-Qwen-model run isn't
+practical in this sandbox): both now keep
+date/seller/product/amount and null only `currency`, with a warning -
+exactly the fix the plan set out to make, replacing the previous
+"Missing required fields: date, seller, product, amount, currency" total
+loss.
+Backend `pytest` (385 passed, 2 pre-existing platform skips), `ruff format
+--check`, `ruff check`, and `mypy src` (strict) all pass with zero
+findings. No frontend contract changed (`InvoiceExtraction.evidence`/
+`warnings` shapes are unchanged) - not run.
+
+### Block 3 revised, 2026-09-20: salvage now still asks the model to retry
+
+After manual testing, the developer asked to revisit two things: (1) salvage
+skipping the repair call entirely (even with fields left over) meant a
+recoverable single-field mistake was never given a second chance - "let's
+call the model in this case"; (2) XML warning text ending in bare "falling
+back" didn't say what it falls back *to*.
+
+Fixed (2): every `xml_adapter.py` warning ending "falling back" now ends
+"falling back to AI extraction" (13 occurrences, mechanical wording change,
+substrings the existing field-name assertions check are unaffected -
+`tests/extraction/test_xml_adapter.py` still passes unchanged).
+
+Fixed (1), more involved: `_parse` now returns
+`tuple[InvoiceExtraction, ValidationError | None]` - the error is `None`
+for a fully valid response, or the original (pre-salvage) error otherwise.
+`extract_invoice` no longer returns a salvaged result immediately; it
+remembers it as `salvaged_fallback` and, if attempts remain, sends a repair
+prompt built from that same original error - reusing the existing
+`build_repair_prompt` machinery, so the model sees exactly which field(s)
+were wrong. A subsequent fully-valid response wins outright; a
+subsequent response that's JSON-broken or otherwise unsalvageable falls
+back to the last good `salvaged_fallback` instead of the terminal all-null
+result (this is new and deliberate: a repair attempt that does worse than
+the previous salvage must never discard a better result already in hand -
+same "don't lose valid partial data to a later failure" principle as
+`analysis/pipeline.py`'s XML-fallback-crash handling from plan 05 Block 6).
+Only when no attempt ever produces anything useful, and no salvage ever
+succeeded, does the terminal `model output could not be validated` path
+still apply - unchanged from before.
+Every test that scripted exactly one response for a salvageable case now
+scripts two (repair repeats the same mistake) and asserts 2 prompts, and a
+new `test_schema_violation_on_one_field_is_recovered_by_a_repair_call`
+proves the new-behavior half: repair succeeding fully wins outright with no
+warnings left. `_salvage`'s docstring was also corrected - it previously
+claimed a distinct check for "nested error under something other than
+evidence," but the code only ever inspects `loc[0]`; nesting depth was
+never actually checked, evidence just happens to be the only field capable
+of producing nested errors today.
+Backend `pytest` (386 passed, 2 pre-existing platform skips), `ruff format
+--check`, `ruff check`, and `mypy src` (strict) all pass with zero
+findings. Re-verified against the real captured `model-validation-error_01/02`
+responses (repair scripted to repeat the same 'DE' mistake, since no second
+real response was captured): 2 model calls now happen, and the result is
+unchanged (`currency` null with a warning, every other field intact) -
+proving the fallback-to-salvage path engages correctly rather than losing
+the earlier good result.
+
+### Block 3 corrected, 2026-09-20: the revision above had its own 3 bugs
+
+The developer reproduced 3 real gaps in the "still ask the model to retry"
+revision, each a way the retry loop could do worse than the salvaged result
+it already had in hand - the exact class of bug that revision's own comments
+claimed couldn't happen:
+
+1. **A repair `model.generate()` failure escaped uncaught** instead of
+   returning the saved `salvaged_fallback` - a crash during the *optional*
+   retry attempt would propagate out of `extract_invoice` entirely, losing
+   an already-useful result and breaking the module's own "never raises"
+   docstring promise. Fixed: that one `generate()` call is now wrapped in
+   `try/except Exception`, returning `salvaged_fallback` on any failure.
+   `test_repair_generation_failure_returns_the_saved_salvage_instead_of_raising`.
+2. **A worse repair unconditionally overwrote a better salvage.**
+   `salvaged_fallback = extraction` ran on every salvageable attempt with no
+   comparison to what was already saved - a repair that recovered only 1
+   useful field would silently replace an earlier result that had 4. Fixed:
+   new `_usable_field_count()` counts how many of the 5 filename fields are
+   usable; `salvaged_fallback` is only replaced when the new count is
+   strictly higher. `test_a_worse_repair_salvage_does_not_overwrite_a_better_earlier_one`.
+3. **A malformed repair response ended the loop early.** The
+   `except (JSONDecodeError, ValidationError)` branch checked
+   `if salvaged_fallback is not None` and returned immediately, *before*
+   checking whether `attempts >= max_repair_attempts` - so a broken repair
+   response burned the retry loop's last chance even when a further attempt
+   was still available (e.g. `max_repair_attempts=2` on the first repair).
+   Fixed: the attempts-exhausted check now runs first; falling back to
+   `salvaged_fallback` (or the terminal all-null result) only happens once
+   there's truly no budget left. `test_malformed_repair_response_still_uses_a_remaining_attempt`.
+
+All three were reproduced failing against the pre-fix code first (temporarily
+reverted the file, confirmed each new test fails there - including a real
+uncaught `RuntimeError` for bug 1 - then restored the fix), not just written
+against the fixed version. Refactored `extract_invoice` to use a shared
+`_merge_document_warnings()` helper at every return site instead of
+duplicating the `model_copy(update={"warnings": ...})` call three different
+ways, which is what made the ordering bug in fix 3 easy to spot and fix
+correctly (the exhausted-attempts check now genuinely gates every fallback
+path, not just the one it happened to be attached to before).
+Backend `pytest` (389 passed, 2 pre-existing platform skips), `ruff format
+--check`, `ruff check`, and `mypy src` (strict) all pass with zero findings.
+
+### Block 3 corrected a second time, 2026-09-20: the other generate() call site had the same gap
+
+Fix 1 above only wrapped the salvage-branch's `model.generate()` call
+(the one used to top up an already-useful salvaged result). The *other*
+repair call - `except (JSONDecodeError, ValidationError)`'s own
+`model.generate()`, used to retry after a malformed/unparseable repair
+response - was left unprotected, so the exact same crash was still
+reproducible: salvageable response -> malformed repair -> that second
+`generate()` call raises -> uncaught `RuntimeError` out of `extract_invoice`,
+discarding the salvaged result already in hand. Reproduced first (same
+revert/confirm-fails/restore method as the first pass), then fixed: that
+call is now wrapped the same way, falling back to `salvaged_fallback` if one
+exists, or a new shared `_terminal_failure()` helper (factored out of the
+existing attempts-exhausted branch, which built the same kind of all-null
+warning result inline) if nothing was ever salvaged.
+`test_malformed_repair_then_generation_crash_returns_the_saved_salvage`
+(`max_repair_attempts=2`, so a repair attempt is still available when the
+crash happens - proving this isn't just the attempts-exhausted path).
+Backend `pytest` (390 passed, 2 pre-existing platform skips), `ruff format
+--check`, `ruff check`, and `mypy src` (strict) all pass with zero findings.
+
+**Known gap, explicitly deferred to a separate task, 2026-09-20:** the very
+first `model.generate(prompt)` call (`extractor.py:46`, before the retry loop
+starts at all) is still unprotected. Predates this version (0.33.4) entirely
+- it's not a regression from either fix above - and unlike the two calls
+fixed here, there is no `salvaged_fallback` or prior attempt to preserve at
+that point, so a crash there needs different handling (probably the same
+`_terminal_failure()` treatment) rather than reusing this fix's pattern
+as-is. The developer confirmed: leave it for a separate task, don't expand
+this fix further.
 
 ## Block 4: Happy path end-to-end verification
 
@@ -371,13 +550,18 @@ if repair cannot recover them.
   this test silently stops covering Block 2 the same way the original file
   02 fixture did. XML seller is absent so extraction fallback still runs;
   script a valid model seller plus an invalid currency and conflicting
-  product/date/amount. Assert: the seller survives salvage (Block 3); XML
-  product/date/amount/currency win over the model's conflicting guesses
-  (Block 1); the resulting `FilenameProposal` has `requires_review=True`
-  with Block 2's truncation warning in `proposal.warnings`; Block 3's
-  currency-salvage warning is still present in `extraction.warnings` at
-  the same time (both warning sources must survive together, neither
-  clobbering the other); and only one extraction call occurs.
+  product/date/amount, then script the repair response with the same
+  invalid currency again (per this block's later revision, salvage still
+  spends a repair attempt, so the repair response must be scripted too -
+  repeating the same mistake keeps the salvage warning present to assert
+  on, rather than accidentally letting repair fix it). Assert: the seller
+  survives salvage (Block 3); XML product/date/amount/currency win over the
+  model's conflicting guesses (Block 1); the resulting `FilenameProposal`
+  has `requires_review=True` with Block 2's truncation warning in
+  `proposal.warnings`; Block 3's currency-salvage warning is still present
+  in `extraction.warnings` at the same time (both warning sources must
+  survive together, neither clobbering the other); and exactly two
+  extraction calls occur (the initial attempt plus the one repair retry).
 - Add a separate partial-XML case whose product remains unavailable
   because a competitor has no usable amount. Script a valid model product
   alongside invalid currency; assert the product survives salvage, the

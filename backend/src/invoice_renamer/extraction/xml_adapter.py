@@ -105,7 +105,8 @@ def _bounded(text: str | None, field_name: str) -> tuple[str | None, str | None]
     if len(text) > _MAX_FIELD_TEXT_LENGTH:
         return (
             None,
-            f"{field_name}: XML value exceeds {_MAX_FIELD_TEXT_LENGTH} characters; falling back",
+            f"{field_name}: XML value exceeds {_MAX_FIELD_TEXT_LENGTH} characters; "
+            "falling back to AI extraction",
         )
     return text, None
 
@@ -161,7 +162,9 @@ def _extract_issue_date(root: Element) -> _FieldResult[date]:
     element, ambiguous = _find_unique(root, _ISSUE_DATE_PATH)
     if ambiguous:
         return _FieldResult(
-            None, None, "invoice_date: multiple conflicting XML issue dates; falling back"
+            None,
+            None,
+            "invoice_date: multiple conflicting XML issue dates; falling back to AI extraction",
         )
     text, warning = _bounded(_text(element), "invoice_date")
     if warning is not None:
@@ -175,7 +178,7 @@ def _extract_issue_date(root: Element) -> _FieldResult[date]:
             None,
             None,
             f"invoice_date: unsupported XML date format "
-            f"{_truncate_for_warning(format_code)!r}; falling back",
+            f"{_truncate_for_warning(format_code)!r}; falling back to AI extraction",
         )
 
     try:
@@ -184,7 +187,8 @@ def _extract_issue_date(root: Element) -> _FieldResult[date]:
         return _FieldResult(
             None,
             None,
-            f"invoice_date: unparseable XML date {_truncate_for_warning(text)!r}; falling back",
+            f"invoice_date: unparseable XML date {_truncate_for_warning(text)!r}; "
+            "falling back to AI extraction",
         )
 
     return _FieldResult(parsed, _ISSUE_DATE_PATH, None)
@@ -194,7 +198,9 @@ def _extract_seller(root: Element) -> _FieldResult[str]:
     element, ambiguous = _find_unique(root, _SELLER_NAME_PATH)
     if ambiguous:
         return _FieldResult(
-            None, None, "seller: multiple conflicting XML seller names; falling back"
+            None,
+            None,
+            "seller: multiple conflicting XML seller names; falling back to AI extraction",
         )
     text, warning = _bounded(_text(element), "seller")
     if warning is not None:
@@ -208,7 +214,9 @@ def _extract_currency(root: Element) -> _FieldResult[str]:
     element, ambiguous = _find_unique(root, _CURRENCY_PATH)
     if ambiguous:
         return _FieldResult(
-            None, None, "currency: multiple conflicting XML currency codes; falling back"
+            None,
+            None,
+            "currency: multiple conflicting XML currency codes; falling back to AI extraction",
         )
     text, warning = _bounded(_text(element), "currency")
     if warning is not None:
@@ -221,7 +229,8 @@ def _extract_currency(root: Element) -> _FieldResult[str]:
         return _FieldResult(
             None,
             None,
-            f"currency: invalid XML currency code {_truncate_for_warning(text)!r}; falling back",
+            f"currency: invalid XML currency code {_truncate_for_warning(text)!r}; "
+            "falling back to AI extraction",
         )
     return _FieldResult(validated, _CURRENCY_PATH, None)
 
@@ -230,7 +239,9 @@ def _extract_gross_total(root: Element) -> _FieldResult[Decimal]:
     element, ambiguous = _find_unique(root, _GROSS_TOTAL_PATH)
     if ambiguous:
         return _FieldResult(
-            None, None, "gross_total: multiple conflicting XML grand totals; falling back"
+            None,
+            None,
+            "gross_total: multiple conflicting XML grand totals; falling back to AI extraction",
         )
     text = _text(element)
     if text is None:
@@ -241,14 +252,14 @@ def _extract_gross_total(root: Element) -> _FieldResult[Decimal]:
             None,
             None,
             f"gross_total: invalid or out-of-range XML amount "
-            f"{_truncate_for_warning(text)!r}; falling back",
+            f"{_truncate_for_warning(text)!r}; falling back to AI extraction",
         )
     if value < 0:
         return _FieldResult(
             None,
             None,
             f"gross_total: XML grand total {_truncate_for_warning(text)!r} is negative; "
-            "falling back",
+            "falling back to AI extraction",
         )
     return _FieldResult(value, _GROSS_TOTAL_PATH, None)
 
@@ -296,14 +307,14 @@ def _extract_product_summary(root: Element) -> _FieldResult[str]:
             None,
             None,
             "product_summary: multiple XML line items include one with no usable name; "
-            "falling back",
+            "falling back to AI extraction",
         )
     if any(item.amount is None for item in items):
         return _FieldResult(
             None,
             None,
             "product_summary: multiple XML line items include one with no usable amount; "
-            "falling back",
+            "falling back to AI extraction",
         )
 
     # Every item is now guaranteed a name and a non-negative amount, so this
@@ -328,7 +339,7 @@ def _extract_product_summary(root: Element) -> _FieldResult[str]:
             None,
             None,
             "product_summary: combined top line items exceed "
-            f"{_MAX_FIELD_TEXT_LENGTH} characters; falling back",
+            f"{_MAX_FIELD_TEXT_LENGTH} characters; falling back to AI extraction",
         )
     return _FieldResult(combined, _LINE_ITEMS_PATH, None)
 

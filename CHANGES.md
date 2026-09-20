@@ -1,5 +1,16 @@
 # Changelog
 
+## Version 0.33.4 (2026-09-20, claude sonnet-5)
+
+- bugfix: salvage a model extraction field by field instead of discarding it whole
+
+  One invalid field used to fail the whole response, discarding everything
+  else the model got right. Now only that field is dropped and re-validated,
+  with one crash-safe repair attempt to recover it - never replaced by a
+  worse retry - before the gap is accepted.
+
+- Say what XML extraction warnings fall back to (now 'falling back to AI extraction')
+
 ## Version 0.33.3 (2026-09-20, claude sonnet-5)
 
 - bugfix: flag a truncated proposed filename for review instead of silently cutting it
