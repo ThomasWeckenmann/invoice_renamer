@@ -2,6 +2,10 @@
 
 import type { RunMetrics } from "./api/types";
 
+export function basename(path: string): string {
+  return path.split(/[\\/]/).pop() ?? path;
+}
+
 export function formatBytes(bytes: number): string {
   if (bytes <= 0) return "0 B";
   const units = ["B", "KB", "MB", "GB"];

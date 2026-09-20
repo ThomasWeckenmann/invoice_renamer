@@ -18,8 +18,8 @@ pub fn run() {
             commands::read_file_bytes,
             commands::open_with_system_default,
             commands::rename::rename_batch,
-            commands::rename::undo_last_rename_batch,
-            commands::rename::get_last_batch_summary,
+            commands::rename::undo_rename_batch,
+            commands::rename::list_rename_batches,
         ])
         .setup(|app| {
             // Booted in the background rather than awaited here: this runs

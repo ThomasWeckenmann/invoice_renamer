@@ -62,11 +62,24 @@ pub struct UndoBatchOutcome {
     pub history_warning: Option<String>,
 }
 
+/// One file's source/destination paths, stripped of the internal
+/// `FileIdentity` that undoing a batch needs but the frontend preview has
+/// no use for. `still_valid` is `history::validate_entry` run ahead of
+/// time, so the preview can flag a file that's been moved or deleted since
+/// the batch was recorded before the user commits to undoing it.
 #[derive(Debug, Clone, Serialize)]
-pub struct LastBatchSummary {
+pub struct BatchSummaryEntry {
+    pub source_path: String,
+    pub destination_path: String,
+    pub still_valid: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BatchSummary {
     pub batch_id: String,
     pub applied_at_unix_ms: u128,
     pub item_count: usize,
+    pub entries: Vec<BatchSummaryEntry>,
 }
 
 fn is_plain_filename(name: &str) -> bool {
@@ -248,40 +261,33 @@ pub fn rename_batch(
     })
 }
 
-/// Reverses the most recent rename batch that still has unreversed entries.
-/// Every entry is validated first (the file at its destination must still
-/// be the same file that was renamed there - checked by device/inode
-/// identity - and its original name must be free again, checked without
-/// following symlinks so a dangling one there still counts as occupied);
-/// if any entry fails validation, nothing is reversed. Once validation
-/// passes, entries are reversed independently through the same atomic
-/// no-overwrite primitive `rename_batch` uses, and any that fail at the
-/// OS level stay recorded for a later retry rather than being discarded.
+/// Reverses one rename batch (any batch still listed by
+/// `list_rename_batches`, not necessarily the most recent) identified by
+/// `batch_id`. Every entry is validated first (the file at its destination
+/// must still be the same file that was renamed there - checked by
+/// device/inode identity - and its original name must be free again,
+/// checked without following symlinks so a dangling one there still counts
+/// as occupied); if any entry fails validation, nothing is reversed. Once
+/// validation passes, entries are reversed independently through the same
+/// atomic no-overwrite primitive `rename_batch` uses, and any that fail at
+/// the OS level stay recorded for a later retry rather than being
+/// discarded. Undoing an older batch out of order is safe: a later batch
+/// that touched the same file changes its identity, so that entry's
+/// validation fails cleanly instead of overwriting the wrong file.
 #[tauri::command]
-pub fn undo_last_rename_batch(app: AppHandle) -> Result<UndoBatchOutcome, String> {
-    let Some(batch) = history::last_undoable_batch(&app)? else {
-        return Err("there is no rename batch to undo".to_string());
+pub fn undo_rename_batch(app: AppHandle, batch_id: String) -> Result<UndoBatchOutcome, String> {
+    let Some(batch) = history::list_undoable_batches(&app)?
+        .into_iter()
+        .find(|batch| batch.id == batch_id)
+    else {
+        return Err("that rename batch is no longer available to undo".to_string());
     };
 
-    let mut problems = Vec::new();
-    for entry in &batch.entries {
-        let destination = Path::new(&entry.destination_path);
-        match history::file_identity(destination) {
-            Ok(identity) if identity == entry.identity => {}
-            Ok(_) => problems.push(format!(
-                "{}: a different file now exists here, cannot verify identity",
-                entry.destination_path
-            )),
-            Err(_) => problems.push(format!("{}: no longer exists", entry.destination_path)),
-        }
-        let source = Path::new(&entry.source_path);
-        if source.symlink_metadata().is_ok() && source != destination {
-            problems.push(format!(
-                "{}: another file now exists at the original name",
-                entry.source_path
-            ));
-        }
-    }
+    let problems: Vec<String> = batch
+        .entries
+        .iter()
+        .filter_map(|entry| history::validate_entry(entry).err())
+        .collect();
     if !problems.is_empty() {
         return Err(format!(
             "cannot undo, no changes were made: {}",
@@ -323,15 +329,29 @@ pub fn undo_last_rename_batch(app: AppHandle) -> Result<UndoBatchOutcome, String
     })
 }
 
+/// Every batch still available to undo, most recent first.
 #[tauri::command]
-pub fn get_last_batch_summary(app: AppHandle) -> Result<Option<LastBatchSummary>, String> {
-    Ok(
-        history::last_undoable_batch(&app)?.map(|batch| LastBatchSummary {
+pub fn list_rename_batches(app: AppHandle) -> Result<Vec<BatchSummary>, String> {
+    Ok(history::list_undoable_batches(&app)?
+        .into_iter()
+        .map(|batch| BatchSummary {
             batch_id: batch.id,
             applied_at_unix_ms: batch.applied_at_unix_ms,
             item_count: batch.entries.len(),
-        }),
-    )
+            entries: batch
+                .entries
+                .into_iter()
+                .map(|entry| {
+                    let still_valid = history::validate_entry(&entry).is_ok();
+                    BatchSummaryEntry {
+                        source_path: entry.source_path,
+                        destination_path: entry.destination_path,
+                        still_valid,
+                    }
+                })
+                .collect(),
+        })
+        .collect())
 }
 
 #[cfg(test)]

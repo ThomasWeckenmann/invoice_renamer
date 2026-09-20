@@ -4,7 +4,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getLastBatchSummary, renameBatch, undoLastRenameBatch } from "./rename";
+import { listRenameBatches, renameBatch, undoRenameBatch } from "./rename";
 
 const mockedInvoke = vi.mocked(invoke);
 
@@ -22,19 +22,19 @@ describe("rename API", () => {
     expect(mockedInvoke).toHaveBeenCalledWith("rename_batch", { items });
   });
 
-  it("undoLastRenameBatch invokes undo_last_rename_batch with no args", async () => {
+  it("undoRenameBatch invokes undo_rename_batch with the batch id", async () => {
     mockedInvoke.mockResolvedValue({ batch_id: "batch-1", results: [], history_warning: null });
 
-    await undoLastRenameBatch();
+    await undoRenameBatch("batch-1");
 
-    expect(mockedInvoke).toHaveBeenCalledWith("undo_last_rename_batch");
+    expect(mockedInvoke).toHaveBeenCalledWith("undo_rename_batch", { batchId: "batch-1" });
   });
 
-  it("getLastBatchSummary invokes get_last_batch_summary with no args", async () => {
-    mockedInvoke.mockResolvedValue(null);
+  it("listRenameBatches invokes list_rename_batches with no args", async () => {
+    mockedInvoke.mockResolvedValue([]);
 
-    await getLastBatchSummary();
+    await listRenameBatches();
 
-    expect(mockedInvoke).toHaveBeenCalledWith("get_last_batch_summary");
+    expect(mockedInvoke).toHaveBeenCalledWith("list_rename_batches");
   });
 });

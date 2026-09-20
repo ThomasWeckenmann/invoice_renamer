@@ -5,6 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "invoice-renamer"
 version = "0.1.0"
+license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
     "defusedxml>=0.7.1",

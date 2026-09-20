@@ -65,3 +65,21 @@ Use that script rather than `cargo tauri build` on its own. The worker is a dire
 On Linux, `cargo tauri build` still produces `deb/`, `appimage/` and/or `rpm/` packages, but they don't contain the worker; `cargo tauri dev` is the supported way to run the app there.
 
 This app isn't signed or notarized, since it's meant to be built and run by you, not distributed. That means macOS Gatekeeper blocks a plain double-click the first time — right-click the `.app` and choose Open once to bypass that; it opens normally after.
+
+## Licenses
+
+Invoice Renamer's own source code is licensed under the [MIT License](LICENSE).
+Copyright (c) 2026 Thomas Weckenmann.
+
+The [third-party notices](backend/THIRD-PARTY-LICENSES) include the following macOS OCR dependencies:
+
+| Dependency | License |
+| --- | --- |
+| ocrmac | MIT |
+| pyobjc-core | MIT |
+| pyobjc-framework-Vision | MIT |
+| click | BSD-3-Clause |
+
+These notices are included in the packaged worker at `_internal/THIRD-PARTY-LICENSES`. They cover the macOS OCR additions, not every application dependency; see the notices for the separate libffi caveat.
+
+The [model catalog](backend/src/invoice_renamer/models/catalog_data.py) records Apache 2.0 for both Granite 3.3 2B Instruct and Qwen3 0.6B. Models are downloaded separately through the app and are not bundled with it. Dependency and model licenses are separate from the project's own license.

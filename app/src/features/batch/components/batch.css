@@ -756,3 +756,130 @@
 .batch-workspace__note[role="alert"] {
   color: var(--danger-ink);
 }
+
+/* modal */
+
+.modal {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  box-shadow: 0 20px 48px oklch(0.2 0.01 80 / 30%);
+  padding: 22px 24px;
+  width: 100%;
+  max-width: 480px;
+  max-height: 80vh;
+  overflow-y: auto;
+  margin: auto;
+}
+
+.modal::backdrop {
+  background: oklch(0.2 0.01 80 / 45%);
+}
+
+.modal h3 {
+  margin: 0 0 10px;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.modal__lead {
+  margin: 0 0 14px;
+  font-size: 13px;
+  color: var(--ink-70);
+}
+
+.modal__note {
+  margin: 14px 0 0;
+  font-size: 12px;
+  color: var(--ink-50);
+}
+
+.modal__note--warn {
+  padding: 9px 11px;
+  border-radius: 8px;
+  background: var(--danger-tint);
+  border: 1px solid oklch(0.9 0.04 25);
+  color: var(--danger-ink);
+}
+
+.modal__note--hidden {
+  visibility: hidden;
+}
+
+.modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.undo-confirm__nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.undo-confirm__nav .btn-icon {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.undo-confirm__nav-label {
+  font-size: 12px;
+  color: var(--ink-50);
+  text-align: center;
+}
+
+.undo-confirm__list {
+  list-style: none;
+  margin: 0;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  height: 260px;
+  overflow-y: auto;
+  background: var(--bg-tint);
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+}
+
+.undo-confirm__item {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.undo-confirm__name {
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.undo-confirm__name--original {
+  color: var(--ink-50);
+}
+
+.undo-confirm__arrow {
+  flex-shrink: 0;
+  color: var(--ink-35);
+}
+
+.undo-confirm__item--stale .undo-confirm__name {
+  color: var(--danger-ink);
+  text-decoration: line-through;
+}
+
+.undo-confirm__stale-note {
+  flex-basis: 100%;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  color: var(--danger-ink);
+}

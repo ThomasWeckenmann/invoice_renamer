@@ -57,6 +57,34 @@ pub struct RenameEntryRecord {
     pub identity: FileIdentity,
 }
 
+/// Checks whether an entry can still be safely undone: the file at its
+/// destination must still be the same file that was renamed there (checked
+/// by device/inode identity), and its original name must be free again
+/// (checked without following symlinks, so a dangling one there still
+/// counts as occupied). Returns the problem description on failure, so both
+/// a preview (`list_rename_batches`) and the actual Undo can share one rule.
+pub fn validate_entry(entry: &RenameEntryRecord) -> Result<(), String> {
+    let destination = Path::new(&entry.destination_path);
+    match file_identity(destination) {
+        Ok(identity) if identity == entry.identity => {}
+        Ok(_) => {
+            return Err(format!(
+                "{}: a different file now exists here, cannot verify identity",
+                entry.destination_path
+            ));
+        }
+        Err(_) => return Err(format!("{}: no longer exists", entry.destination_path)),
+    }
+    let source = Path::new(&entry.source_path);
+    if source.symlink_metadata().is_ok() && source != destination {
+        return Err(format!(
+            "{}: another file now exists at the original name",
+            entry.source_path
+        ));
+    }
+    Ok(())
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RenameBatchRecord {
     pub id: String,
@@ -121,16 +149,17 @@ pub fn append_batch<R: Runtime>(
     save(app, &history)
 }
 
-/// The most recent batch that still has entries to reverse, if any.
-pub fn last_undoable_batch<R: Runtime>(
+/// Every batch that still has entries to reverse, most recent first.
+pub fn list_undoable_batches<R: Runtime>(
     app: &AppHandle<R>,
-) -> Result<Option<RenameBatchRecord>, String> {
+) -> Result<Vec<RenameBatchRecord>, String> {
     let history = load(app)?;
     Ok(history
         .batches
         .into_iter()
         .rev()
-        .find(|batch| !batch.entries.is_empty()))
+        .filter(|batch| !batch.entries.is_empty())
+        .collect())
 }
 
 /// Replaces a batch's remaining entries, e.g. after Undo reverses some or

@@ -12,6 +12,7 @@ import { BatchProgressBar } from "./BatchProgressBar";
 import { ImportDropzone } from "./ImportDropzone";
 import { CheckIcon, EyeIcon, FilterIcon, SparkleIcon } from "./icons";
 import { ModelSelector } from "./ModelSelector";
+import { UndoConfirmDialog } from "./UndoConfirmDialog";
 
 export function BatchWorkspace() {
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
@@ -22,6 +23,7 @@ export function BatchWorkspace() {
   const [compactView, setCompactView] = useState(true);
   const [issuesOnly, setIssuesOnly] = useState(false);
   const [modelsCollapsed, setModelsCollapsed] = useState(false);
+  const [confirmingUndo, setConfirmingUndo] = useState(false);
   const catalog = useModelCatalog();
   const batch = useBatchWorkspace();
   const rename = useRenameTransaction();
@@ -62,6 +64,16 @@ export function BatchWorkspace() {
     if (selectedModelId && canAnalyzeItem) {
       batch.rerunItem(id, selectedModelId, shortenFields);
     }
+  };
+
+  const handleOpenUndoConfirm = () => {
+    setConfirmingUndo(true);
+    void rename.refreshUndoableBatches();
+  };
+
+  const handleConfirmUndo = () => {
+    setConfirmingUndo(false);
+    rename.undoSelectedBatch();
   };
 
   return (
@@ -238,10 +250,23 @@ export function BatchWorkspace() {
             type="button"
             className="btn"
             disabled={!rename.canUndo || rename.isUndoing}
-            onClick={rename.undoLastBatch}
+            onClick={handleOpenUndoConfirm}
           >
-            {rename.isUndoing ? "Undoing…" : "Undo last batch"}
+            {rename.isUndoing ? "Undoing…" : "Undo…"}
           </button>
+          {rename.redoAvailable && (
+            <button
+              type="button"
+              className="btn"
+              disabled={rename.isRenaming}
+              onClick={rename.redoLastUndo}
+              title={`Redo: reapply the rename Undo just reversed (${rename.redoCount} file${
+                rename.redoCount === 1 ? "" : "s"
+              })`}
+            >
+              {rename.isRenaming ? "Redoing…" : `Redo (${rename.redoCount})`}
+            </button>
+          )}
           <span className="batch-workspace__commit-spacer" />
           <button
             type="button"
@@ -263,6 +288,20 @@ export function BatchWorkspace() {
           )}
         </div>
       </section>
+
+      {confirmingUndo && rename.selectedBatch && (
+        <UndoConfirmDialog
+          batch={rename.selectedBatch}
+          position={rename.selectedBatchIndex + 1}
+          total={rename.undoableBatches.length}
+          canSelectOlder={rename.canSelectOlderBatch}
+          canSelectNewer={rename.canSelectNewerBatch}
+          onSelectOlder={rename.selectOlderBatch}
+          onSelectNewer={rename.selectNewerBatch}
+          onConfirm={handleConfirmUndo}
+          onCancel={() => setConfirmingUndo(false)}
+        />
+      )}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 /** Client for the Tauri rename-transaction commands: apply an approved
- * batch and undo the most recent one. Types mirror the Rust command
- * contracts in src-tauri/src/commands/rename.rs field for field. */
+ * batch and undo any past one still on record. Types mirror the Rust
+ * command contracts in src-tauri/src/commands/rename.rs field for field. */
 
 import { invoke } from "@tauri-apps/api/core";
 
@@ -33,20 +33,32 @@ export interface UndoBatchOutcome {
   history_warning: string | null;
 }
 
-export interface LastBatchSummary {
+/** One file's source/destination paths from an undoable batch, for
+ * previewing what Undo will do without performing it. `still_valid` is a
+ * preflight check run ahead of time (same rule the actual Undo enforces),
+ * so a file moved or deleted since the batch was recorded can be flagged
+ * before the user commits to undoing it. */
+export interface BatchSummaryEntry {
+  source_path: string;
+  destination_path: string;
+  still_valid: boolean;
+}
+
+export interface BatchSummary {
   batch_id: string;
   applied_at_unix_ms: number;
   item_count: number;
+  entries: BatchSummaryEntry[];
 }
 
 export function renameBatch(items: RenameItemInput[]): Promise<RenameBatchOutcome> {
   return invoke<RenameBatchOutcome>("rename_batch", { items });
 }
 
-export function undoLastRenameBatch(): Promise<UndoBatchOutcome> {
-  return invoke<UndoBatchOutcome>("undo_last_rename_batch");
+export function undoRenameBatch(batchId: string): Promise<UndoBatchOutcome> {
+  return invoke<UndoBatchOutcome>("undo_rename_batch", { batchId });
 }
 
-export function getLastBatchSummary(): Promise<LastBatchSummary | null> {
-  return invoke<LastBatchSummary | null>("get_last_batch_summary");
+export function listRenameBatches(): Promise<BatchSummary[]> {
+  return invoke<BatchSummary[]>("list_rename_batches");
 }

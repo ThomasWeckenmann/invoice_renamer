@@ -1,9 +1,11 @@
 /** Tests for the rename transaction hook: sending approved items, mapping
- * results back onto items by request id, and Undo. */
+ * results back onto items by request id, and Undo (including paging
+ * between multiple undoable batches). */
 
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as renameApi from "../../lib/tauri/rename";
+import type { BatchSummary } from "../../lib/tauri/rename";
 import type { BatchItem } from "./types";
 import { useRenameTransaction } from "./useRenameTransaction";
 
@@ -41,34 +43,48 @@ function approvedItem(overrides: Partial<BatchItem> = {}): BatchItem {
   };
 }
 
+function batchSummary(overrides: Partial<BatchSummary> = {}): BatchSummary {
+  return {
+    batch_id: "batch-1",
+    applied_at_unix_ms: 1000,
+    item_count: 1,
+    entries: [
+      {
+        source_path: "/invoices/invoice.pdf",
+        destination_path: "/invoices/renamed.pdf",
+        still_valid: true,
+      },
+    ],
+    ...overrides,
+  };
+}
+
 describe("useRenameTransaction", () => {
   afterEach(() => {
     vi.resetAllMocks();
   });
 
-  it("checks for an undoable batch on mount", async () => {
-    vi.mocked(renameApi.getLastBatchSummary).mockResolvedValue(null);
+  it("checks for undoable batches on mount", async () => {
+    vi.mocked(renameApi.listRenameBatches).mockResolvedValue([]);
 
     const { result } = renderHook(() => useRenameTransaction());
 
-    await waitFor(() => expect(renameApi.getLastBatchSummary).toHaveBeenCalled());
+    await waitFor(() => expect(renameApi.listRenameBatches).toHaveBeenCalled());
     expect(result.current.canUndo).toBe(false);
+    expect(result.current.selectedBatch).toBeNull();
   });
 
   it("enables Undo on mount when a persisted batch is still undoable", async () => {
-    vi.mocked(renameApi.getLastBatchSummary).mockResolvedValue({
-      batch_id: "batch-1",
-      applied_at_unix_ms: 1000,
-      item_count: 2,
-    });
+    vi.mocked(renameApi.listRenameBatches).mockResolvedValue([batchSummary()]);
 
     const { result } = renderHook(() => useRenameTransaction());
 
     await waitFor(() => expect(result.current.canUndo).toBe(true));
+    expect(result.current.selectedBatch).toEqual(batchSummary());
   });
 
   it("sends only approved items, keyed by request id", async () => {
-    vi.mocked(renameApi.getLastBatchSummary).mockResolvedValue(null);
+    vi.mocked(renameApi.listRenameBatches).mockResolvedValueOnce([]).mockResolvedValue([batchSummary()]);
     vi.mocked(renameApi.renameBatch).mockResolvedValue({
       batch_id: "batch-1",
       results: [
@@ -99,7 +115,7 @@ describe("useRenameTransaction", () => {
       status: "renamed",
       destinationPath: "/invoices/2026-01-05_Acme_Widget_42-EUR.pdf",
     });
-    expect(result.current.canUndo).toBe(true);
+    await waitFor(() => expect(result.current.canUndo).toBe(true));
   });
 
   it("keeps duplicate-source-path rows distinct, since only request id correlates results", async () => {
@@ -107,7 +123,7 @@ describe("useRenameTransaction", () => {
     // picked twice). Rust can only actually rename the first one - its
     // source disappears before the second attempt runs - but each row
     // must still report its own, correct outcome.
-    vi.mocked(renameApi.getLastBatchSummary).mockResolvedValue(null);
+    vi.mocked(renameApi.listRenameBatches).mockResolvedValue([]);
     vi.mocked(renameApi.renameBatch).mockResolvedValue({
       batch_id: "batch-1",
       results: [
@@ -147,7 +163,7 @@ describe("useRenameTransaction", () => {
   });
 
   it("records a per-item failure without touching other items", async () => {
-    vi.mocked(renameApi.getLastBatchSummary).mockResolvedValue(null);
+    vi.mocked(renameApi.listRenameBatches).mockResolvedValue([]);
     vi.mocked(renameApi.renameBatch).mockResolvedValue({
       batch_id: null,
       results: [
@@ -174,7 +190,7 @@ describe("useRenameTransaction", () => {
   });
 
   it("surfaces a history_warning after a successful rename as a rename error", async () => {
-    vi.mocked(renameApi.getLastBatchSummary).mockResolvedValue(null);
+    vi.mocked(renameApi.listRenameBatches).mockResolvedValue([]);
     vi.mocked(renameApi.renameBatch).mockResolvedValue({
       batch_id: null,
       results: [
@@ -203,7 +219,7 @@ describe("useRenameTransaction", () => {
   });
 
   it("excludes already-renamed items from a later rename call", async () => {
-    vi.mocked(renameApi.getLastBatchSummary).mockResolvedValue(null);
+    vi.mocked(renameApi.listRenameBatches).mockResolvedValue([]);
     vi.mocked(renameApi.renameBatch).mockResolvedValue({
       batch_id: "batch-1",
       results: [
@@ -229,7 +245,7 @@ describe("useRenameTransaction", () => {
   });
 
   it("surfaces a whole-batch rename failure", async () => {
-    vi.mocked(renameApi.getLastBatchSummary).mockResolvedValue(null);
+    vi.mocked(renameApi.listRenameBatches).mockResolvedValue([]);
     vi.mocked(renameApi.renameBatch).mockRejectedValue(
       new Error("cannot rename, no changes were made: /invoices/invoice.pdf: no longer exists"),
     );
@@ -245,11 +261,10 @@ describe("useRenameTransaction", () => {
   });
 
   it("undo clears outcomes for items the undo actually reversed", async () => {
-    vi.mocked(renameApi.getLastBatchSummary).mockResolvedValue({
-      batch_id: "batch-1",
-      applied_at_unix_ms: 1000,
-      item_count: 1,
-    });
+    vi.mocked(renameApi.listRenameBatches)
+      .mockResolvedValueOnce([batchSummary()])
+      .mockResolvedValueOnce([batchSummary()])
+      .mockResolvedValue([]);
     vi.mocked(renameApi.renameBatch).mockResolvedValue({
       batch_id: "batch-1",
       results: [
@@ -262,7 +277,7 @@ describe("useRenameTransaction", () => {
       ],
       history_warning: null,
     });
-    vi.mocked(renameApi.undoLastRenameBatch).mockResolvedValue({
+    vi.mocked(renameApi.undoRenameBatch).mockResolvedValue({
       batch_id: "batch-1",
       results: [
         {
@@ -277,22 +292,19 @@ describe("useRenameTransaction", () => {
     const { result } = renderHook(() => useRenameTransaction());
     act(() => result.current.renameApproved([approvedItem()]));
     await waitFor(() => expect(result.current.outcomes["item-1"]).toBeDefined());
+    await waitFor(() => expect(result.current.canUndo).toBe(true));
 
-    vi.mocked(renameApi.getLastBatchSummary).mockResolvedValue(null);
-    act(() => result.current.undoLastBatch());
+    act(() => result.current.undoSelectedBatch());
 
+    expect(renameApi.undoRenameBatch).toHaveBeenCalledWith("batch-1");
     await waitFor(() => expect(result.current.outcomes["item-1"]).toBeUndefined());
     await waitFor(() => expect(result.current.canUndo).toBe(false));
     expect(result.current.undoError).toBeNull();
   });
 
   it("surfaces a per-file undo failure instead of silently ignoring it", async () => {
-    vi.mocked(renameApi.getLastBatchSummary).mockResolvedValue({
-      batch_id: "batch-1",
-      applied_at_unix_ms: 1000,
-      item_count: 2,
-    });
-    vi.mocked(renameApi.undoLastRenameBatch).mockResolvedValue({
+    vi.mocked(renameApi.listRenameBatches).mockResolvedValue([batchSummary({ item_count: 2 })]);
+    vi.mocked(renameApi.undoRenameBatch).mockResolvedValue({
       batch_id: "batch-1",
       results: [
         {
@@ -310,7 +322,8 @@ describe("useRenameTransaction", () => {
     });
 
     const { result } = renderHook(() => useRenameTransaction());
-    act(() => result.current.undoLastBatch());
+    await waitFor(() => expect(result.current.canUndo).toBe(true));
+    act(() => result.current.undoSelectedBatch());
 
     await waitFor(() =>
       expect(result.current.undoError).toBe(
@@ -320,8 +333,8 @@ describe("useRenameTransaction", () => {
   });
 
   it("surfaces an undo history_warning alongside any per-file failures", async () => {
-    vi.mocked(renameApi.getLastBatchSummary).mockResolvedValue(null);
-    vi.mocked(renameApi.undoLastRenameBatch).mockResolvedValue({
+    vi.mocked(renameApi.listRenameBatches).mockResolvedValue([batchSummary()]);
+    vi.mocked(renameApi.undoRenameBatch).mockResolvedValue({
       batch_id: "batch-1",
       results: [
         {
@@ -334,7 +347,8 @@ describe("useRenameTransaction", () => {
     });
 
     const { result } = renderHook(() => useRenameTransaction());
-    act(() => result.current.undoLastBatch());
+    await waitFor(() => expect(result.current.canUndo).toBe(true));
+    act(() => result.current.undoSelectedBatch());
 
     await waitFor(() =>
       expect(result.current.undoError).toBe("the Undo record could not be updated"),
@@ -342,14 +356,181 @@ describe("useRenameTransaction", () => {
   });
 
   it("surfaces an undo command failure without clearing outcomes", async () => {
-    vi.mocked(renameApi.getLastBatchSummary).mockResolvedValue(null);
-    vi.mocked(renameApi.undoLastRenameBatch).mockRejectedValue(
-      new Error("there is no rename batch to undo"),
+    vi.mocked(renameApi.listRenameBatches).mockResolvedValue([batchSummary()]);
+    vi.mocked(renameApi.undoRenameBatch).mockRejectedValue(
+      new Error("that rename batch is no longer available to undo"),
     );
 
     const { result } = renderHook(() => useRenameTransaction());
-    act(() => result.current.undoLastBatch());
+    await waitFor(() => expect(result.current.canUndo).toBe(true));
+    act(() => result.current.undoSelectedBatch());
 
-    await waitFor(() => expect(result.current.undoError).toBe("there is no rename batch to undo"));
+    await waitFor(() =>
+      expect(result.current.undoError).toBe("that rename batch is no longer available to undo"),
+    );
+  });
+
+  it("pages between multiple undoable batches with older/newer navigation", async () => {
+    const older = batchSummary({ batch_id: "batch-1", applied_at_unix_ms: 1000 });
+    const newer = batchSummary({ batch_id: "batch-2", applied_at_unix_ms: 2000 });
+    vi.mocked(renameApi.listRenameBatches).mockResolvedValue([newer, older]);
+
+    const { result } = renderHook(() => useRenameTransaction());
+    await waitFor(() => expect(result.current.undoableBatches).toHaveLength(2));
+
+    expect(result.current.selectedBatch).toEqual(newer);
+    expect(result.current.canSelectOlderBatch).toBe(true);
+    expect(result.current.canSelectNewerBatch).toBe(false);
+
+    act(() => result.current.selectOlderBatch());
+    expect(result.current.selectedBatch).toEqual(older);
+    expect(result.current.canSelectOlderBatch).toBe(false);
+    expect(result.current.canSelectNewerBatch).toBe(true);
+
+    act(() => result.current.selectNewerBatch());
+    expect(result.current.selectedBatch).toEqual(newer);
+  });
+
+  it("offers Redo after a successful undo, reapplying the same rename when clicked", async () => {
+    vi.mocked(renameApi.listRenameBatches).mockResolvedValue([batchSummary()]);
+    vi.mocked(renameApi.undoRenameBatch).mockResolvedValue({
+      batch_id: "batch-1",
+      results: [
+        {
+          outcome: "renamed",
+          source_path: "/invoices/renamed.pdf",
+          destination_path: "/invoices/invoice.pdf",
+        },
+      ],
+      history_warning: null,
+    });
+    vi.mocked(renameApi.renameBatch).mockResolvedValue({
+      batch_id: "batch-2",
+      results: [
+        {
+          request_id: "/invoices/invoice.pdf",
+          outcome: "renamed",
+          source_path: "/invoices/invoice.pdf",
+          destination_path: "/invoices/renamed.pdf",
+        },
+      ],
+      history_warning: null,
+    });
+
+    const { result } = renderHook(() => useRenameTransaction());
+    await waitFor(() => expect(result.current.canUndo).toBe(true));
+    expect(result.current.redoAvailable).toBe(false);
+
+    act(() => result.current.undoSelectedBatch());
+    await waitFor(() => expect(result.current.redoAvailable).toBe(true));
+    expect(result.current.redoCount).toBe(1);
+
+    act(() => result.current.redoLastUndo());
+
+    expect(renameApi.renameBatch).toHaveBeenCalledWith([
+      {
+        request_id: "/invoices/invoice.pdf",
+        source_path: "/invoices/invoice.pdf",
+        desired_filename: "renamed.pdf",
+      },
+    ]);
+    await waitFor(() => expect(result.current.redoAvailable).toBe(false));
+    await waitFor(() => expect(result.current.isRenaming).toBe(false));
+  });
+
+  it("preserves the original row id through Undo then Redo, not the file path", async () => {
+    vi.mocked(renameApi.listRenameBatches).mockResolvedValueOnce([]).mockResolvedValue([batchSummary()]);
+    vi.mocked(renameApi.renameBatch).mockResolvedValueOnce({
+      batch_id: "batch-1",
+      results: [
+        {
+          request_id: "item-1",
+          outcome: "renamed",
+          source_path: "/invoices/invoice.pdf",
+          destination_path: "/invoices/renamed.pdf",
+        },
+      ],
+      history_warning: null,
+    });
+    vi.mocked(renameApi.undoRenameBatch).mockResolvedValue({
+      batch_id: "batch-1",
+      results: [
+        {
+          outcome: "renamed",
+          source_path: "/invoices/renamed.pdf",
+          destination_path: "/invoices/invoice.pdf",
+        },
+      ],
+      history_warning: null,
+    });
+
+    const { result } = renderHook(() => useRenameTransaction());
+    act(() => result.current.renameApproved([approvedItem()]));
+    await waitFor(() => expect(result.current.outcomes["item-1"]).toBeDefined());
+    await waitFor(() => expect(result.current.canUndo).toBe(true));
+
+    act(() => result.current.undoSelectedBatch());
+    await waitFor(() => expect(result.current.redoAvailable).toBe(true));
+    await waitFor(() => expect(result.current.outcomes["item-1"]).toBeUndefined());
+
+    vi.mocked(renameApi.renameBatch).mockResolvedValueOnce({
+      batch_id: "batch-2",
+      results: [
+        {
+          request_id: "item-1",
+          outcome: "renamed",
+          source_path: "/invoices/invoice.pdf",
+          destination_path: "/invoices/renamed.pdf",
+        },
+      ],
+      history_warning: null,
+    });
+    act(() => result.current.redoLastUndo());
+
+    // The redo request must carry the row's own id, not the file path -
+    // otherwise the row's outcome lookup (and thus its locked/Open state)
+    // never gets updated even though the file was renamed again on disk.
+    expect(renameApi.renameBatch).toHaveBeenLastCalledWith([
+      {
+        request_id: "item-1",
+        source_path: "/invoices/invoice.pdf",
+        desired_filename: "renamed.pdf",
+      },
+    ]);
+    await waitFor(() =>
+      expect(result.current.outcomes["item-1"]).toEqual({
+        status: "renamed",
+        destinationPath: "/invoices/renamed.pdf",
+      }),
+    );
+  });
+
+  it("clears a pending Redo once a new rename happens instead", async () => {
+    vi.mocked(renameApi.listRenameBatches).mockResolvedValue([batchSummary()]);
+    vi.mocked(renameApi.undoRenameBatch).mockResolvedValue({
+      batch_id: "batch-1",
+      results: [
+        {
+          outcome: "renamed",
+          source_path: "/invoices/renamed.pdf",
+          destination_path: "/invoices/invoice.pdf",
+        },
+      ],
+      history_warning: null,
+    });
+    vi.mocked(renameApi.renameBatch).mockResolvedValue({
+      batch_id: null,
+      results: [],
+      history_warning: null,
+    });
+
+    const { result } = renderHook(() => useRenameTransaction());
+    await waitFor(() => expect(result.current.canUndo).toBe(true));
+
+    act(() => result.current.undoSelectedBatch());
+    await waitFor(() => expect(result.current.redoAvailable).toBe(true));
+
+    act(() => result.current.renameApproved([approvedItem()]));
+    expect(result.current.redoAvailable).toBe(false);
   });
 });

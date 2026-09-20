@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 0.33.0 (2026-09-20, claude sonnet-5)
+
+- Let Undo target any past rename batch, and add a matching Redo
+
+  The confirm modal pages between every batch on record via a native
+  dialog (focus trap/Escape/restoration), stays a fixed height between
+  batches, and revalidates on open. New single-level Redo, fixed to
+  keep the original row's id so the UI stays in sync after Redo.
+
 ## Version 0.32.0 (2026-09-19, claude sonnet-5)
 
 - Redesign the batch workspace toolbar and status pills, and add a collapsible Model panel
