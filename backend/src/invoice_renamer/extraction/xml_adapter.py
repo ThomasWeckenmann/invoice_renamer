@@ -13,8 +13,10 @@ Factur-X invoice in fixtures/ZUGFeRD-Example.pdf):
   This is deliberately not ram:DuePayableAmount, which subtracts any prepayment and
   so can differ from the invoice's actual gross total.
 - Product summary: the single line item's product name, or the dominant item's name
-  when one item's line total is at least double the runner-up's; otherwise left for
-  model fallback rather than guessed.
+  when one item's line total is at least double the runner-up's. Otherwise the top 2
+  items by amount are combined ('A + B'); this still requires every item to have a
+  usable name and amount, so an item with neither blocks it and falls back to the
+  model rather than guessing which two are actually the top 2.
 
 Every field is independent CII schema-wise, allows at most one occurrence (maxOccurs=1
 in the real schema), so more than one match at a field's path means the document
@@ -80,6 +82,10 @@ _MAX_WARNING_VALUE_CHARS = 50
 # A line item's amount must be at least this many times its runner-up's to count as
 # an unambiguous, single dominant product for the filename - see module docstring.
 _DOMINANCE_RATIO = 2
+
+# Joins the top 2 line items by amount into one product_summary when neither
+# dominates - see module docstring.
+_COMBINE_SEPARATOR = " + "
 
 
 def _text(element: Element | None) -> str | None:
@@ -309,13 +315,22 @@ def _extract_product_summary(root: Element) -> _FieldResult[str]:
     ]
     ranked = sorted(priced, key=lambda entry: entry[1], reverse=True)
     top_name, top_amount = ranked[0]
-    _, second_amount = ranked[1]
+    second_name, second_amount = ranked[1]
     if top_amount > 0 and top_amount >= _DOMINANCE_RATIO * second_amount:
         return _FieldResult(top_name, _LINE_ITEMS_PATH, None)
 
-    return _FieldResult(
-        None, None, "product_summary: no single XML line item clearly dominates; falling back"
-    )
+    # No single item dominates, but every item still has a usable name and
+    # amount (checked above) - combine the top 2 by amount instead of
+    # discarding a perfectly good pair of names to model fallback.
+    combined = f"{top_name}{_COMBINE_SEPARATOR}{second_name}"
+    if len(combined) > _MAX_FIELD_TEXT_LENGTH:
+        return _FieldResult(
+            None,
+            None,
+            "product_summary: combined top line items exceed "
+            f"{_MAX_FIELD_TEXT_LENGTH} characters; falling back",
+        )
+    return _FieldResult(combined, _LINE_ITEMS_PATH, None)
 
 
 def extract_invoice_from_xml(candidate: XmlCandidate) -> InvoiceExtraction:

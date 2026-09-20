@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 0.33.2 (2026-09-20, claude sonnet-5)
+
+- bugfix: combine the top 2 XML line items into product_summary when neither dominates
+
+  Previously fell back to the model whenever no line item was at least 2x its
+  runner-up. Now joins the top 2 by amount ('Item A + Item B') as long as
+  every item still has a usable name and amount; an unresolved competitor
+  still blocks it exactly as before.
+
 ## Version 0.33.1 (2026-09-20, claude opus-5)
 
 - bugfix: confirm the detected accelerator against torch before selecting a device
