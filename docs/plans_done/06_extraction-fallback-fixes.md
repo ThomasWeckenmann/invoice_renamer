@@ -1,8 +1,7 @@
 # Extraction fallback fixes
 
-Status: Blocks 1-3 complete and verified (pytest/ruff/mypy; frontend tsc/eslint
-clean, vitest needs the developer's machine - see Block 2's note). Blocks 4-5
-not started.
+Status: All 5 blocks complete and verified (pytest/ruff/mypy; frontend
+tsc/eslint clean, vitest needs the developer's machine - see Block 2's note).
 
 ## Goal
 
@@ -585,6 +584,141 @@ Local files confirm their actual XML branches; file 01's unresolved
 competitor remains a fallback, file 02 no longer needs extraction fallback,
 and file 02's proposal truthfully reports whether its filename was
 truncated.
+
+### Block 4 accepted, 2026-09-20
+
+Four new synthetic CII fixtures added via `scripts/generate_fixture_pdfs.py`
+(generated directly into `fixtures/`, not by re-running the whole script's
+`main()` - a full regeneration was checked first and confirmed non-deterministic,
+since reportlab embeds a fresh creation timestamp per PDF, which would have
+rewritten every existing tracked fixture's bytes for no content change):
+`with_zugferd_xml_combine_fits.pdf` (two non-dominant items, `Item A`/`Item B`,
+short enough to stay under the stem limit, every other field present),
+`with_zugferd_xml_combine_truncates.pdf` (same shape but with two 90-char
+item names, forcing truncation), `with_zugferd_xml_combine_truncates_no_seller.pdf`
+(the truncating pair again, with no seller so fallback still runs), and
+`with_zugferd_xml_unusable_competitor.pdf` (one item has a blank amount,
+blocking combination/dominance entirely so product_summary is left for
+fallback while date/seller/currency/gross_total still resolve from XML).
+
+Added to `backend/tests/analysis/test_pipeline.py` (5 new tests):
+combination-only skips the model entirely and produces `Item-A-Item-B`
+with XML evidence and `requires_review=False`; the truncating pair comes
+back `requires_review=True` with Block 2's warning; a happy-path test
+crossing all three fixes (`with_zugferd_xml_combine_truncates_no_seller.pdf`
+plus a scripted model with a valid seller, conflicting date/product/amount,
+and an invalid currency) proves the seller survives salvage, XML wins for
+every field it supplies despite the model's conflicting guesses, the
+proposal is `requires_review=True` with both the truncation warning
+(`proposal.warnings`) and the salvage warning (`extraction.warnings`)
+present together, and exactly 2 model calls happen (initial + one repair,
+counted via a small `_CountingModel`); a separate partial-XML case
+(`with_zugferd_xml_unusable_competitor.pdf`) proves a salvaged model
+product survives alongside the other four unchanged XML fields, with both
+the XML "no usable amount" warning and the salvage "currency" warning
+reaching the result; and a pure-model case (no XML at all) proves only
+`currency` ends up missing when the model gets the other four fields right.
+
+Added to `backend/tests/evaluation/test_benchmark.py` (2 new tests):
+a salvageable single-field mistake (repeated on repair) scores
+`failed=False` with `currency` null and a warning; an unrecoverable
+all-five-fields-invalid response (the same payload shape as
+`test_all_five_filename_fields_invalid_with_repeated_failure_reports_terminal_marker`
+in `test_extractor.py`) still reports `failed=True` with the
+`_REPAIR_FAILURE_MARKER` text, proving valid `language` alone doesn't
+rescue it.
+
+**Real local fixtures**, run through `run_document_analysis` directly
+(not the CLI benchmark script - see the note below on why a real model
+wasn't used here): `xml-issue-02-dominance-fallback.pdf` with the model
+factory set to raise if called (`shorten_enabled=False`) now returns
+`requires_review=True` with the Block 2 truncation warning and
+`extraction_source="xml"` - the model never loads. With `shorten_enabled=True`
+and a scripted short seller/product response, the same file comes back
+`requires_review=False` (`2025-05-27_Bergfreunde_Nano-Air-Hoody-Synch-Pants_265-EUR.pdf`),
+confirming the enabled-shortening path is a separate, working escape hatch
+from the truncation warning. `xml-issue-01-unusable-amount-fallback.pdf`
+with a scripted fallback model still retains its unusable-amount warning
+and routes `xml_and_model`, unaffected by this block.
+
+Also ran the full `local_benchmark_data/xml-issues/` set (all 5 files)
+through `evaluation.benchmark.run_benchmark(..., use_xml=True)` with a
+scripted (non-real) model returning a fixed valid response, to exercise
+the actual benchmark scoring/routing code path end to end: file 01 comes
+back `xml_and_model` with its unusable-amount warning, file 02 comes back
+`xml` with zero warnings (no model call at all), and files 03-05
+(unsupported CIUS-suffixed profiles, out of this plan's scope per the
+"Current evidence" section) fall through to the full model path as
+expected, none of them crashing the harness.
+
+**Real model run not attempted, same limitation as Block 3:** the plan's
+"record actual results and remaining missing fields" bullet implies running
+the actual shortlisted model (`qwen3-0.6b`, ~1.2 GB) against file 01 to see
+what it genuinely extracts. That model isn't cached in this sandbox (only
+an unrelated `Qwen2.5-3B-Instruct` is), and downloading + running a real
+transformer inference pass isn't practical here, consistent with Block 3's
+own conclusion. The developer can get this directly with:
+`uv run python backend/scripts/benchmark_models.py --invoices-dir local_benchmark_data/xml-issues --use-xml --models qwen3-0.6b`.
+
+Backend `pytest` (399 passed, 2 pre-existing platform skips), `ruff format
+--check`, `ruff check`, and `mypy src` (strict) all pass with zero findings.
+No frontend contract changed in this block - not run (see Block 5).
+
+### Block 5 accepted, 2026-09-20
+
+- Combined-string length bound: added
+  `test_two_names_each_individually_valid_but_combined_over_the_cap_are_not_bypassed`
+  (`test_xml_adapter.py`) - two 499-char names, each individually valid,
+  whose combination is rejected; also asserts `"product_summary" not in
+  extraction.evidence`, confirming the length check runs before any
+  XML-path evidence is attached, not after.
+- Salvage can only remove fields, never invent/coerce: confirmed by
+  reading `_salvage()` - `salvaged_data` is built by filtering the
+  original dict to keys pydantic didn't reject, then re-validating
+  unmodified; every surviving-field assertion across
+  `test_extractor.py` (e.g. `extraction.seller == "Apple"`) already checks
+  the exact original value survives unchanged, not a coerced one. No
+  separate value is ever substituted for a rejected field - only the
+  schema default.
+- Salvage warning bound: `_MAX_SALVAGE_MESSAGE_CHARS = 50` per field,
+  `_ELIGIBLE_SALVAGE_FIELDS` bounds it to at most 7 warnings, and
+  `_salvage()` builds warnings only from `detail["msg"]` - `input`/`ctx`/the
+  raw response are never touched, already covered by
+  `test_long_pydantic_message_is_truncated_in_the_salvage_warning` and
+  confirmed by re-reading the function.
+- `merge_xml_and_model` conflicting-fields guarantee: re-ran the existing
+  plan 05 Block 3 tests in `test_extraction_router.py` unchanged as part of
+  the full suite - still pass.
+- Benchmark terminal-failure marker: proven by the new
+  `test_run_benchmark_on_repeated_all_fields_invalid_still_reports_terminal_failure`
+  above - a response with valid `language` but all 5 filename fields
+  invalid still ends in `failed=True` with the marker text present.
+- Non-object JSON / unmappable errors retain repair handling, and salvage
+  warnings coexist with document warnings without model-authored warnings
+  leaking in: unchanged, covered by the existing parametrized
+  non-object-JSON tests and `test_document_and_salvage_warnings_are_both_preserved`,
+  all still passing.
+- Truncation warning never echoes truncated text: added
+  `test_truncation_warning_never_echoes_the_actual_truncated_text`
+  (`test_builder.py`) - a distinctive marker embedded in an over-length
+  product name does not appear in the resulting warning, which is the
+  exact fixed string naming only the field(s) and the character limit;
+  the existing `_truncated_fields()` implementation never touches the
+  original text at all, by construction. Fires identically for a plain
+  long `product_summary`/`seller` value (pre-existing Block 2 tests) and
+  for an XML-combined one (this block's `xml-issue-02` and the new
+  synthetic combine-truncates fixture) - no special-casing by source.
+
+Backend `pytest` (399 passed, 2 pre-existing platform skips), `ruff format
+--check`, `ruff check`, and `mypy src` (strict) all pass with zero
+findings. Frontend `tsc --noEmit` and `eslint .` both clean (no
+frontend-visible contract changed since Block 2, which already verified
+this). Frontend `vitest`/`build` still cannot run in this sandbox -
+`app/node_modules` is still missing the Linux-only
+`@rollup/rollup-linux-arm64-gnu` optional dependency, the same
+pre-existing virtiofs-sharing gap noted in Block 2 and plan 05's Block 5;
+unchanged since neither block touched frontend files, so no new
+verification was needed there beyond confirming the gap is unchanged.
 
 ## Block 5: Security, sanity, and safety review
 

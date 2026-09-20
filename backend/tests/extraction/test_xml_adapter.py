@@ -380,6 +380,48 @@ def test_combined_product_summary_over_length_cap_falls_back() -> None:
     )
 
 
+def test_two_names_each_individually_valid_but_combined_over_the_cap_are_not_bypassed() -> None:
+    # Each name alone is just under the per-item 500-char bound (so
+    # _read_line_item accepts both individually) - the combined check must
+    # still catch them together rather than being bypassable by staying just
+    # under the per-item limit on each side. Also confirms the rejected value
+    # never reaches evidence (no xml_path is ever attached to a value that
+    # was rejected for length).
+    name_a = "A" * 499
+    name_b = "B" * 499
+    xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<rsm:CrossIndustryInvoice
+    xmlns:rsm="urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100"
+    xmlns:ram="urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100">
+  <rsm:ExchangedDocumentContext>
+    <ram:GuidelineSpecifiedDocumentContextParameter><ram:ID>urn:cen.eu:en16931:2017</ram:ID></ram:GuidelineSpecifiedDocumentContextParameter>
+  </rsm:ExchangedDocumentContext>
+  <rsm:ExchangedDocument><ram:ID>BOUNDARY-NAMES</ram:ID></rsm:ExchangedDocument>
+  <rsm:SupplyChainTradeTransaction>
+    <ram:IncludedSupplyChainTradeLineItem>
+      <ram:SpecifiedTradeProduct><ram:Name>{name_a}</ram:Name></ram:SpecifiedTradeProduct>
+      <ram:SpecifiedLineTradeSettlement><ram:SpecifiedTradeSettlementLineMonetarySummation><ram:LineTotalAmount>100.00</ram:LineTotalAmount></ram:SpecifiedTradeSettlementLineMonetarySummation></ram:SpecifiedLineTradeSettlement>
+    </ram:IncludedSupplyChainTradeLineItem>
+    <ram:IncludedSupplyChainTradeLineItem>
+      <ram:SpecifiedTradeProduct><ram:Name>{name_b}</ram:Name></ram:SpecifiedTradeProduct>
+      <ram:SpecifiedLineTradeSettlement><ram:SpecifiedTradeSettlementLineMonetarySummation><ram:LineTotalAmount>99.00</ram:LineTotalAmount></ram:SpecifiedTradeSettlementLineMonetarySummation></ram:SpecifiedLineTradeSettlement>
+    </ram:IncludedSupplyChainTradeLineItem>
+    <ram:ApplicableHeaderTradeAgreement>
+      <ram:SellerTradeParty><ram:Name>Some Seller</ram:Name></ram:SellerTradeParty>
+    </ram:ApplicableHeaderTradeAgreement>
+    <ram:ApplicableHeaderTradeSettlement><ram:InvoiceCurrencyCode>EUR</ram:InvoiceCurrencyCode></ram:ApplicableHeaderTradeSettlement>
+  </rsm:SupplyChainTradeTransaction>
+</rsm:CrossIndustryInvoice>
+"""
+    extraction = extract_invoice_from_xml(_candidate_from_xml(xml))
+
+    assert extraction.product_summary is None
+    assert "product_summary" not in extraction.evidence
+    assert any(
+        "product_summary" in warning and "exceed" in warning for warning in extraction.warnings
+    )
+
+
 def test_hostile_looking_xml_text_is_sanitized_like_any_other_extraction() -> None:
     # XML values get no special-cased trust: seller/product text with path-like
     # and quoting characters must come out through the same sanitizer model

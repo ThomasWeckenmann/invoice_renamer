@@ -108,6 +108,31 @@ _ZUGFERD_XML_UNSUPPORTED_PROFILE = _cii_invoice_xml(profile="urn:factur-x.eu:1p0
 _ZUGFERD_XML_DISTINCT_A = _cii_invoice_xml(invoice_id="INV-A", seller_name="Company A")
 _ZUGFERD_XML_DISTINCT_B = _cii_invoice_xml(invoice_id="INV-B", seller_name="Company B")
 
+# Two non-dominant line items (ratio < 2x) short enough that their combined
+# product_summary ('Item A + Item B') fits the filename stem limit untruncated.
+_ZUGFERD_XML_COMBINE_FITS = _cii_invoice_xml(
+    line_items=[("Item A", "100.00"), ("Item B", "90.00")]
+)
+
+# Same non-dominant pair, but each name is long enough that the combined
+# product_summary alone forces naming/builder.py's stem truncation.
+_ZUGFERD_XML_COMBINE_TRUNCATES = _cii_invoice_xml(
+    line_items=[("X" * 90, "100.00"), ("Y" * 90, "90.00")]
+)
+
+# Same long combination, but with no seller - so extraction fallback still
+# runs (partial XML) even though the product itself resolves from XML alone.
+_ZUGFERD_XML_COMBINE_TRUNCATES_NO_SELLER = _cii_invoice_xml(
+    seller_name=None, line_items=[("X" * 90, "100.00"), ("Y" * 90, "90.00")]
+)
+
+# One line item has no usable amount (blank total) - blocks combination/dominance
+# entirely, leaving product_summary for the model while every other field (date,
+# seller, currency, gross total) still resolves from XML.
+_ZUGFERD_XML_UNUSABLE_COMPETITOR = _cii_invoice_xml(
+    line_items=[("Item A", "100.00"), ("Item B", "")]
+)
+
 
 def _text_page_pdf(path: Path, lines: list[str]) -> None:
     c = canvas.Canvas(str(path), pagesize=(400, 500))
@@ -232,6 +257,19 @@ def main() -> None:
         "with_zugferd_xml_partial_scanned.pdf",
         [("factur-x.xml", _ZUGFERD_XML_PARTIAL)],
         base="scanned_invoice.pdf",
+    )
+    _with_attachments("with_zugferd_xml_combine_fits.pdf", [("factur-x.xml", _ZUGFERD_XML_COMBINE_FITS)])
+    _with_attachments(
+        "with_zugferd_xml_combine_truncates.pdf",
+        [("factur-x.xml", _ZUGFERD_XML_COMBINE_TRUNCATES)],
+    )
+    _with_attachments(
+        "with_zugferd_xml_combine_truncates_no_seller.pdf",
+        [("factur-x.xml", _ZUGFERD_XML_COMBINE_TRUNCATES_NO_SELLER)],
+    )
+    _with_attachments(
+        "with_zugferd_xml_unusable_competitor.pdf",
+        [("factur-x.xml", _ZUGFERD_XML_UNUSABLE_COMPETITOR)],
     )
 
     print(f"Wrote fixtures to {FIXTURES_DIR}")

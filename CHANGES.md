@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 0.33.5 (2026-09-20, claude sonnet-5)
+
+- Add end-to-end tests proving the XML combination, truncation, and salvage fixes work together
+
+  New synthetic fixtures and pipeline/benchmark tests prove the XML
+  combination, truncation, and salvage fixes (0.33.2-0.33.4) work together
+  end to end, plus defensive boundary/leak checks on the combined-length
+  cap and the truncation warning.
+
 ## Version 0.33.4 (2026-09-20, claude sonnet-5)
 
 - bugfix: salvage a model extraction field by field instead of discarding it whole

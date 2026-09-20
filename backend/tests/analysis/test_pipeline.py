@@ -454,6 +454,171 @@ def test_xml_detected_with_zero_usable_fields_plus_crash_still_fails_the_job() -
         )
 
 
+def test_two_non_dominant_xml_items_combine_and_skip_the_model_entirely() -> None:
+    # Every filename field (including the combined product_summary) comes from
+    # XML alone, so - like any other complete-XML result - the model must
+    # never load, not even for the combination itself.
+    pdf_bytes = (FIXTURES_DIR / "with_zugferd_xml_combine_fits.pdf").read_bytes()
+
+    def _never_called() -> _FakeLanguageModel:
+        raise AssertionError("shortening is disabled; the model must not load")
+
+    proposal, metrics = run_document_analysis(
+        pdf_bytes,
+        _never_called,
+        model_id="qwen3-0.6b",
+        model_revision=None,
+        shorten_enabled=False,
+    )
+
+    assert proposal.proposed_filename == "2026-01-15_Beispiel-GmbH_Item-A-Item-B_595-EUR.pdf"
+    assert proposal.requires_review is False
+    assert proposal.warnings == []
+    assert proposal.extraction.product_summary == "Item A + Item B"
+    assert proposal.extraction.evidence["product_summary"].xml_field is not None
+    assert metrics.extraction_source == "xml"
+    assert metrics.inference_ran is False
+
+
+def test_combined_xml_product_long_enough_to_truncate_is_flagged_for_review() -> None:
+    # Same combination logic, but the two names are long enough that the
+    # combined product_summary alone forces the filename-stem truncation -
+    # this must come back requires_review=True with a visible reason, not a
+    # silently cut filename.
+    pdf_bytes = (FIXTURES_DIR / "with_zugferd_xml_combine_truncates.pdf").read_bytes()
+
+    def _never_called() -> _FakeLanguageModel:
+        raise AssertionError("shortening is disabled; the model must not load")
+
+    proposal, metrics = run_document_analysis(
+        pdf_bytes,
+        _never_called,
+        model_id="qwen3-0.6b",
+        model_revision=None,
+        shorten_enabled=False,
+    )
+
+    assert proposal.requires_review is True
+    assert any("truncated" in warning for warning in proposal.warnings)
+    assert proposal.missing_fields == []
+    assert metrics.extraction_source == "xml"
+
+
+class _CountingModel:
+    def __init__(self, response: str) -> None:
+        self._response = response
+        self.calls = 0
+
+    def generate(self, prompt: str) -> str:
+        self.calls += 1
+        return self._response
+
+
+def test_happy_path_crosses_combination_truncation_and_salvage_together() -> None:
+    # The end-to-end case tying all three fixes together: XML combines two
+    # non-dominant items into a product name long enough to force filename
+    # truncation (Block 1 + 2), XML has no seller so the model still runs
+    # (fallback), and the model's only mistake is an invalid currency, which
+    # must be salvaged rather than discarding its otherwise-good seller
+    # (Block 3) - while XML still wins for every field it actually supplies.
+    pdf_bytes = (FIXTURES_DIR / "with_zugferd_xml_combine_truncates_no_seller.pdf").read_bytes()
+    model_response = _valid_model_response(
+        seller="Model Seller",
+        invoice_date="2030-01-01",
+        product_summary="Wrong Product",
+        gross_total="1",
+        currency="not-a-code",
+    )
+    model = _CountingModel(model_response)
+
+    proposal, metrics = run_document_analysis(
+        pdf_bytes,
+        lambda: model,
+        model_id="qwen3-0.6b",
+        model_revision=None,
+        shorten_enabled=False,
+    )
+
+    # Seller survives salvage (Block 3) - XML never supplied one.
+    assert proposal.extraction.seller == "Model Seller"
+    # XML wins for every field it actually supplies, ignoring the model's
+    # conflicting guesses (Block 1).
+    assert proposal.extraction.invoice_date.isoformat() == "2026-01-15"
+    assert str(proposal.extraction.gross_total) == "595.00"
+    assert proposal.extraction.currency == "EUR"
+    assert proposal.extraction.product_summary is not None
+    assert proposal.extraction.product_summary.startswith("X" * 90)
+    # Block 2's truncation warning and Block 3's salvage warning both survive
+    # together, neither clobbering the other.
+    assert proposal.requires_review is True
+    assert any("truncated" in warning for warning in proposal.warnings)
+    assert any("currency" in warning for warning in proposal.extraction.warnings)
+    assert metrics.extraction_source == "xml_and_model"
+    # Exactly the initial extraction attempt plus one repair retry - salvage
+    # still spends a repair attempt before settling for the partial result.
+    assert model.calls == 2
+
+
+def test_partial_xml_product_missing_from_an_unusable_competitor_survives_salvage() -> None:
+    # A separate partial-XML case from the crossing test above: here the
+    # product itself (not the seller) is what's missing from XML, because a
+    # competing line item has no usable amount - and the model's response
+    # has its own single-field mistake (invalid currency) that must be
+    # salvaged rather than losing the product it got right.
+    pdf_bytes = (FIXTURES_DIR / "with_zugferd_xml_unusable_competitor.pdf").read_bytes()
+    model_response = _valid_model_response(
+        seller="Wrong Seller",
+        invoice_date="2030-01-01",
+        product_summary="Model Product",
+        gross_total="1",
+        currency="not-a-code",
+    )
+
+    proposal, metrics = run_document_analysis(
+        pdf_bytes,
+        lambda: _FakeLanguageModel(model_response),
+        model_id="qwen3-0.6b",
+        model_revision=None,
+        shorten_enabled=False,
+    )
+
+    assert proposal.extraction.product_summary == "Model Product"
+    # The other four XML fields are unaffected by the model's conflicting guesses.
+    assert proposal.extraction.invoice_date.isoformat() == "2026-01-15"
+    assert proposal.extraction.seller == "Beispiel GmbH"
+    assert str(proposal.extraction.gross_total) == "595.00"
+    assert proposal.extraction.currency == "EUR"
+    # Both the XML warning (unusable competitor) and the salvage warning reach
+    # the pipeline result together.
+    assert any("no usable amount" in warning for warning in proposal.extraction.warnings)
+    assert any("currency" in warning for warning in proposal.extraction.warnings)
+    assert metrics.extraction_source == "xml_and_model"
+
+
+def test_pure_model_case_salvages_everything_but_the_invalid_currency() -> None:
+    # No XML at all: a salvageable single-field model mistake must leave only
+    # currency missing, not the total-loss "every field missing" the
+    # all-or-nothing validation used to produce.
+    pdf_bytes = (FIXTURES_DIR / "selectable_text_en.pdf").read_bytes()
+    model_response = _valid_model_response(currency="not-a-code")
+
+    proposal, metrics = run_document_analysis(
+        pdf_bytes,
+        lambda: _FakeLanguageModel(model_response),
+        model_id="qwen3-0.6b",
+        model_revision=None,
+        shorten_enabled=False,
+    )
+
+    assert proposal.extraction.seller == "Apple"
+    assert proposal.extraction.product_summary == "MacBook Air"
+    assert str(proposal.extraction.gross_total) == "2180"
+    assert proposal.extraction.currency is None
+    assert proposal.missing_fields == ["currency"]
+    assert any("currency" in warning for warning in proposal.extraction.warnings)
+    assert metrics.extraction_source == "model"
+
+
 def test_fallback_crash_preserves_real_ocr_and_page_timing_not_zeros() -> None:
     # Partial XML attached to a scanned (no text layer) page, so read_document
     # must actually run OCR before the model crashes - the recovered metrics

@@ -21,6 +21,29 @@ _CORRECT_RESPONSE = json.dumps(
     }
 )
 
+_SALVAGEABLE_BAD_CURRENCY_RESPONSE = json.dumps(
+    {
+        "invoice_date": None,
+        "seller": "Apple",
+        "product_summary": "MacBook Air",
+        "gross_total": "2180.00",
+        "currency": "not-a-code",
+        "language": "en",
+        "warnings": [],
+    }
+)
+
+_ALL_FIELDS_INVALID_RESPONSE = json.dumps(
+    {
+        "invoice_date": "not-a-date",
+        "seller": ["bad"],
+        "product_summary": ["bad"],
+        "gross_total": "not-a-number",
+        "currency": "not-a-code",
+        "language": "en",
+    }
+)
+
 _WRONG_SELLER_RESPONSE = json.dumps(
     {
         "invoice_date": None,
@@ -152,6 +175,37 @@ def test_run_benchmark_on_a_wrong_field_needs_correction() -> None:
 
     assert result.field_accuracy["seller"] == 0.0
     assert result.correction_rate == 1.0
+
+
+def test_run_benchmark_scores_a_salvageable_single_field_mistake_as_not_failed() -> None:
+    # A single-field model mistake (invalid currency) must be salvaged, not
+    # discarded whole - the benchmark's failure marker only fires for a
+    # response nothing useful ever survives from.
+    model = _ScriptedLanguageModel(
+        [_SALVAGEABLE_BAD_CURRENCY_RESPONSE, _SALVAGEABLE_BAD_CURRENCY_RESPONSE]
+    )
+
+    result = run_benchmark([FIXTURES_DIR / "selectable_text_en.pdf"], model, model_id="test-model")
+
+    assert result.invoices[0].failed is False
+    assert result.invoices[0].extraction.seller == "Apple"
+    assert result.invoices[0].extraction.currency is None
+    assert any("currency" in warning for warning in result.invoices[0].extraction.warnings)
+
+
+def test_run_benchmark_on_repeated_all_fields_invalid_still_reports_terminal_failure() -> None:
+    # Nothing useful survives salvage here (every filename field is invalid),
+    # so repair must still be attempted and, once that also fails, the
+    # terminal failure marker must still fire exactly as before salvage existed.
+    model = _ScriptedLanguageModel([_ALL_FIELDS_INVALID_RESPONSE, _ALL_FIELDS_INVALID_RESPONSE])
+
+    result = run_benchmark([FIXTURES_DIR / "selectable_text_en.pdf"], model, model_id="test-model")
+
+    assert result.invoices[0].failed is True
+    assert any(
+        "model output could not be validated" in warning
+        for warning in result.invoices[0].extraction.warnings
+    )
 
 
 def test_run_benchmark_on_malformed_json_counts_as_a_failure() -> None:

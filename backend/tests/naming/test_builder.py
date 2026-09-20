@@ -154,3 +154,17 @@ def test_extremely_long_seller_truncates_seller_and_product_both() -> None:
     assert len(proposal.warnings) == 1
     assert "seller" in proposal.warnings[0]
     assert "product" in proposal.warnings[0]
+
+
+def test_truncation_warning_never_echoes_the_actual_truncated_text() -> None:
+    # The warning must name which fields were cut and by what limit, never
+    # any of the (potentially arbitrarily long, or sensitive) original text -
+    # a distinctive marker embedded in the product name must not leak into
+    # the bounded, factual warning message.
+    marker = "UNIQUE_MARKER_TOKEN"
+    proposal = build_filename_proposal(_extraction(product_summary=f"{marker}{'-word' * 60}"))
+
+    assert proposal.requires_review is True
+    assert len(proposal.warnings) == 1
+    assert marker not in proposal.warnings[0]
+    assert proposal.warnings[0] == "product truncated to fit the 150-character filename limit"
