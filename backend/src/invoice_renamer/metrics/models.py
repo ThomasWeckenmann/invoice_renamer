@@ -10,6 +10,24 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 ExtractionSourceValue = Literal["xml", "xml_and_model", "model"]
 XmlStatusValue = Literal["none", "supported", "unsupported", "invalid", "ambiguous"]
 
+# Which of run_document_analysis's two, unrelated model passes a call belongs
+# to - extract_invoice's own repair/retry calls are never mixed with
+# shorten_fields' (also possibly-repaired) call(s), so a UI listing them can
+# label each correctly instead of numbering every call as if it were one
+# continuous series of extraction retries.
+ModelCallPhase = Literal["extraction", "shortening"]
+
+
+class ModelCall(BaseModel):
+    """One prompt/response round trip to the language model, in call order -
+    lets a user inspect exactly what was sent and what came back, including
+    any repair/retry calls beyond the initial one in its phase."""
+
+    prompt: str
+    response: str | None = None
+    error: str | None = None
+    phase: ModelCallPhase = "extraction"
+
 
 class RunMetrics(BaseModel):
     total_ms: int
@@ -28,6 +46,9 @@ class RunMetrics(BaseModel):
     output_tokens: int | None = None
     tokens_per_second: float | None = None
     warnings: list[str] = Field(default_factory=list)
+    # Empty for a pre-existing run this field didn't capture yet, or a run
+    # that never called the model at all (pure XML, no shortening).
+    model_calls: list[ModelCall] = Field(default_factory=list)
     # Defaults describe a pre-XML-routing run: model-only, no XML ever detected,
     # inference ran to produce the result - never mark historical metrics as
     # having used XML they never had a chance to see.

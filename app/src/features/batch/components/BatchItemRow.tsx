@@ -11,7 +11,8 @@ import {
 import { openWithSystemDefault } from "../../../lib/tauri/open";
 import type { RenameOutcome } from "../useRenameTransaction";
 import { displayFilename, type BatchItem } from "../types";
-import { CloseIcon, OpenIcon, SparkleIcon, TrashIcon } from "./icons";
+import { CloseIcon, InfoIcon, OpenIcon, SparkleIcon, TrashIcon } from "./icons";
+import { ModelCallsDialog } from "./ModelCallsDialog";
 
 interface BatchItemRowProps {
   item: BatchItem;
@@ -67,6 +68,7 @@ export function BatchItemRow({
   // Every state except a job already in flight, which offers Cancel instead.
   const showAnalyze = !isRenamed && item.status !== "queued" && item.status !== "running";
   const [openError, setOpenError] = useState<string | null>(null);
+  const [showModelCalls, setShowModelCalls] = useState(false);
   const metricsSummary = item.metrics
     ? `${item.metrics.model_id} · ${formatDuration(item.metrics.total_ms)} · ` +
       `${item.metrics.pages_total} page${item.metrics.pages_total === 1 ? "" : "s"}`
@@ -257,6 +259,21 @@ export function BatchItemRow({
               <summary>
                 <span className="batch-item__metrics-label">Run details</span>
                 <span className="batch-item__metrics-summary">{metricsSummary}</span>
+                {item.metrics.model_calls.length > 0 && (
+                  <button
+                    type="button"
+                    className="btn-icon batch-item__metrics-info"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setShowModelCalls(true);
+                    }}
+                    aria-label="Inspect AI calls"
+                    title="Inspect AI calls"
+                  >
+                    <InfoIcon />
+                  </button>
+                )}
               </summary>
               <dl>
                 <div>
@@ -323,6 +340,13 @@ export function BatchItemRow({
         <p role="alert" className="batch-item__error">
           Couldn't open the file: {openError}
         </p>
+      )}
+
+      {showModelCalls && item.metrics && (
+        <ModelCallsDialog
+          calls={item.metrics.model_calls}
+          onClose={() => setShowModelCalls(false)}
+        />
       )}
     </li>
   );

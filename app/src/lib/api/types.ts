@@ -35,6 +35,15 @@ export interface FilenameProposal {
 export type ExtractionSource = "xml" | "xml_and_model" | "model";
 export type XmlStatus = "none" | "supported" | "unsupported" | "invalid" | "ambiguous";
 
+export type ModelCallPhase = "extraction" | "shortening";
+
+export interface ModelCall {
+  prompt: string;
+  response: string | null;
+  error: string | null;
+  phase: ModelCallPhase;
+}
+
 export interface RunMetrics {
   total_ms: number;
   pdf_extraction_ms: number;
@@ -56,6 +65,7 @@ export interface RunMetrics {
   xml_profile_id: string | null;
   xml_fields_used: string[];
   inference_ran: boolean;
+  model_calls: ModelCall[];
 }
 
 export type JobStatus = "queued" | "running" | "completed" | "failed" | "cancelled";

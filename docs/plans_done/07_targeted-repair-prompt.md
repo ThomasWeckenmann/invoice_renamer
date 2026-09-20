@@ -1,7 +1,10 @@
 # Targeted repair prompt
 
-Status: not started. Split out of `06_extraction-fallback-fixes.md` -
-out of scope there.
+Status: Done. Block 1 implemented and verified; scope grew during
+implementation (see Implementation notes below) to include null-field
+retry, an AI-calls inspector UI, and a follow-up fix that also touched the
+main extraction prompt, deviating from the 'main prompt out of scope'
+decision below.
 
 ## Goal
 
@@ -99,48 +102,45 @@ today's (skips instructions for fields that already validated) and
 explicitly tells the model what it got wrong and why, for every field
 capable of being salvaged.
 
-## Block 2: Happy path end-to-end verification
+## Implementation notes (post-implementation)
 
-- Re-run the real captured `model-validation-error_01.pdf`/`_02.pdf` raw
-  responses through the new repair-prompt builder (not just unit-testing it
-  in isolation) and inspect the actual resulting prompt text.
-- Add a scripted-model extractor test where the first response has a
-  salvageable field and the repair response fixes it, asserting the repair
-  prompt sent (`model.prompts[1]`) is the new narrow one, not the full one.
-- Manually re-run the small qwen3-0.6b model against
-  `model-validation-error_01.pdf`/`_02.pdf` (or similar real invoices) and
-  record whether the narrower, disambiguated retry actually recovers
-  `currency` more often than the current full-prompt retry - this is the
-  actual point of the change and can't be proven by unit tests alone.
+Block 1 shipped as designed, plus additional work requested during
+implementation, beyond this plan's original scope:
 
-Acceptance: the new prompt is proven correct end to end (not just via its
-own unit tests), and there's a recorded real-world comparison of recovery
-rate before/after.
+- Null-field retry: a fully-valid response that still leaves a useful field
+  (invoice_date/seller/product_summary/gross_total/currency) null now also
+  gets one bounded, narrow retry call - not just a pydantic-rejected field.
+  Confirmed against a real qwen3-0.6b run: it recovered both a date and a
+  total on retry that it had returned null for on the first pass. A
+  rejected field and a null field are combined into one retry call when
+  both occur together, so one doesn't starve the other of the single
+  available repair attempt.
+- AI-calls inspector: an (i) button in the app's Run details now opens a
+  popup showing every model call (prompt + response/error) made for an
+  invoice, in order, labeled by phase (extraction vs. the separate
+  shortening pass) with per-phase retry numbering. Backend: `RunMetrics`
+  gained `model_calls: list[ModelCall]`, populated by wrapping the model in
+  a recording decorator in `analysis/pipeline.py`.
+- Two real bugs were found (via code review) and fixed, both confirmed by
+  direct reproduction before and after: a narrow repair reply was treated
+  as a wholesale new extraction (wiping every other already-good field to
+  null), and a reply mixing one recoverable field with one still-bad field
+  discarded the recoverable one because all fields in a reply were
+  validated together instead of independently.
+- The AI-calls inspector then surfaced a real prompt-design issue: the
+  filename-safety note (for seller/product_summary) lived in a shared
+  footer sent with every prompt, including narrow retries not asking about
+  those fields - plausibly why a real reply volunteered them unprompted.
+  Fixed by moving the note into the seller/product_summary field
+  instructions themselves. Those instructions are shared with
+  `build_extraction_prompt`, so - deviating from the "main prompt out of
+  scope" decision above - the main extraction prompt's wording changed
+  too, not just the repair prompt.
 
-## Block 3: Security, sanity, and safety review
-
-- Confirm the previous (rejected) value shown back to the model can't blow
-  up the prompt - the length bounds `_salvage`'s own warnings already
-  respect for user-facing text don't automatically apply here since this
-  text goes to the model, not the UI; decide and document an explicit bound
-  (or confirm existing upstream field-length limits already make this moot).
-- Confirm a rejected field with a non-string previous value (e.g. a list,
-  dict, or other type from a hostile/broken model response) can be safely
-  rendered into the prompt without crashing (e.g. `json.dumps`, not naive
-  string formatting that could raise on an unexpected type).
-- Confirm the refactored `_FIELD_INSTRUCTIONS` produces an unchanged
-  `build_extraction_prompt` output (covered by Block 1's parity test) -
-  re-verify explicitly here, since a silent wording drift in the *main*
-  prompt would reopen the "also tighten the prompt" scope the developer
-  explicitly deferred earlier.
-- Run backend `pytest`, `ruff format --check`, `ruff check`, and `mypy src`.
-  No frontend contract changes expected (prompt text is backend-internal) -
-  confirm `InvoiceExtraction`/`FilenameProposal` shapes are untouched and
-  skip frontend verification if so.
-
-Acceptance: the new repair-prompt path can't be crashed or blown up by a
-hostile/malformed previous value, and the main extraction prompt is provably
-unaffected.
+Verification: backend `pytest` (432 passed), `ruff format --check`, `ruff
+check`, and `mypy src` all pass. Frontend `tsc -b` and `eslint` pass;
+`npm run test`/`npm run build` could not be run in this sandbox (shared
+node_modules with the developer's Mac via virtiofs - see project memory).
 
 ## Implementation bookkeeping
 

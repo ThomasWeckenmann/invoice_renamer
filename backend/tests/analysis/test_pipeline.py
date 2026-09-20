@@ -130,6 +130,9 @@ def test_complete_xml_skips_ocr_but_still_shortens_seller_and_product() -> None:
         "gross_total",
         "currency",
     }
+    # An XML-complete run's only model call is the shortening pass - it must
+    # never be tagged as if it were an extraction call.
+    assert [call.phase for call in metrics.model_calls] == ["shortening"]
 
 
 def test_shorten_disabled_never_loads_a_model_for_a_complete_xml_result() -> None:
@@ -642,3 +645,92 @@ def test_fallback_crash_preserves_real_ocr_and_page_timing_not_zeros() -> None:
     assert metrics.ocr_ms > 0
     assert metrics.total_ms >= metrics.ocr_ms
     assert proposal.extraction.invoice_date.isoformat() == "2026-01-15"
+
+
+def test_model_calls_records_the_single_extraction_call() -> None:
+    pdf_bytes = (FIXTURES_DIR / "selectable_text_en.pdf").read_bytes()
+    model_response = _valid_model_response()
+
+    _, metrics = run_document_analysis(
+        pdf_bytes,
+        lambda: _FakeLanguageModel(model_response),
+        model_id="qwen3-0.6b",
+        model_revision=None,
+        shorten_enabled=False,
+    )
+
+    assert len(metrics.model_calls) == 1
+    assert metrics.model_calls[0].response == model_response
+    assert metrics.model_calls[0].error is None
+    assert metrics.model_calls[0].phase == "extraction"
+    assert "Extract these fields" in metrics.model_calls[0].prompt
+
+
+def test_model_calls_records_the_initial_and_repair_call_in_order() -> None:
+    pdf_bytes = (FIXTURES_DIR / "selectable_text_en.pdf").read_bytes()
+    invalid_response = _valid_model_response(currency="not-a-code")
+    narrow_repair_response = json.dumps({"currency": "EUR"})
+
+    class _ScriptedModel:
+        def __init__(self) -> None:
+            self._responses = [invalid_response, narrow_repair_response]
+
+        def generate(self, prompt: str) -> str:
+            return self._responses.pop(0)
+
+    _, metrics = run_document_analysis(
+        pdf_bytes,
+        lambda: _ScriptedModel(),
+        model_id="qwen3-0.6b",
+        model_revision=None,
+        shorten_enabled=False,
+    )
+
+    assert len(metrics.model_calls) == 2
+    assert metrics.model_calls[0].response == invalid_response
+    assert metrics.model_calls[1].response == narrow_repair_response
+    assert metrics.model_calls[0].phase == "extraction"
+    assert metrics.model_calls[1].phase == "extraction"
+    # The repair call is the narrow one - it must not repeat the full 6-field
+    # instructions, only the rejected field's.
+    assert "ISO-4217 currency code" in metrics.model_calls[1].prompt
+    assert "REWRITTEN as YYYY-MM-DD" not in metrics.model_calls[1].prompt
+
+
+def test_model_calls_tags_the_shortening_call_distinctly_from_extraction() -> None:
+    # Regression: shorten_fields' call used to be numbered as if it were
+    # another extraction retry ('Retry 2') even though it's an unrelated
+    # pass with its own prompt - it must be tagged by its own phase instead.
+    pdf_bytes = (FIXTURES_DIR / "selectable_text_en.pdf").read_bytes()
+    model_response = _valid_model_response()
+
+    _, metrics = run_document_analysis(
+        pdf_bytes,
+        lambda: _FakeLanguageModel(model_response),
+        model_id="qwen3-0.6b",
+        model_revision=None,
+        shorten_enabled=True,
+    )
+
+    assert [call.phase for call in metrics.model_calls] == ["extraction", "shortening"]
+
+
+def test_model_calls_records_a_crashed_call_with_its_error() -> None:
+    pdf_bytes = (FIXTURES_DIR / "with_zugferd_xml_partial_scanned.pdf").read_bytes()
+
+    class _CrashingModel:
+        def generate(self, prompt: str) -> str:
+            raise RuntimeError("simulated model crash")
+
+    _, metrics = run_document_analysis(
+        pdf_bytes,
+        lambda: _CrashingModel(),
+        model_id="qwen3-0.6b",
+        model_revision=None,
+        shorten_enabled=True,
+    )
+
+    assert len(metrics.model_calls) == 1
+    assert metrics.model_calls[0].response is None
+    assert "simulated model crash" in metrics.model_calls[0].error
+    assert metrics.model_calls[0].phase == "extraction"

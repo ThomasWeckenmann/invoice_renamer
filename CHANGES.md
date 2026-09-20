@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 0.34.0 (2026-09-20, claude sonnet-5)
+
+- Add an AI-calls inspector and make the model's repair/retry prompts narrower and more accurate
+
+  Salvage-triggered repairs and still-null fields are now retried together
+  in one narrow call showing only what's wrong (previously the full
+  6-field prompt, or no retry at all for null fields). A new (i) button
+  in Run details shows every prompt and response, including retries.
+
 ## Version 0.33.5 (2026-09-20, claude sonnet-5)
 
 - Add end-to-end tests proving the XML combination, truncation, and salvage fixes work together

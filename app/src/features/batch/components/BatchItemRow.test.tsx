@@ -33,6 +33,7 @@ function runMetrics(overrides: Partial<RunMetrics> = {}): RunMetrics {
     xml_profile_id: null,
     xml_fields_used: [],
     inference_ran: true,
+    model_calls: [],
     ...overrides,
   };
 }
@@ -214,6 +215,160 @@ describe("BatchItemRow", () => {
     expect(screen.getByText("3 (1 via OCR)")).toBeInTheDocument();
     expect(screen.getByText("512 in / 64 out (12.5 tok/s)")).toBeInTheDocument();
     expect(screen.getByText("PDF text + AI (OCR)")).toBeInTheDocument();
+  });
+
+  it("omits the AI-calls info button when no model calls were recorded", () => {
+    render(
+      <ul>
+        <BatchItemRow
+          item={reviewItem({ metrics: runMetrics({ model_calls: [] }) })}
+          onEditFilename={noop}
+          onApprove={noop}
+          onUnapprove={noop}
+          onCancel={noop}
+          onAnalyze={noop}
+          canAnalyze={true}
+          onRemove={noop}
+        />
+      </ul>,
+    );
+
+    expect(screen.queryByLabelText("Inspect AI calls")).not.toBeInTheDocument();
+  });
+
+  it("opens a popup listing every recorded AI call, initial and retry, when the info button is clicked", () => {
+    render(
+      <ul>
+        <BatchItemRow
+          item={reviewItem({
+            metrics: runMetrics({
+              model_calls: [
+                {
+                  prompt: "extract these fields...",
+                  response: '{"seller": "Apple"}',
+                  error: null,
+                  phase: "extraction",
+                },
+                {
+                  prompt: "extract only currency...",
+                  response: '{"currency": "EUR"}',
+                  error: null,
+                  phase: "extraction",
+                },
+              ],
+            }),
+          })}
+          onEditFilename={noop}
+          onApprove={noop}
+          onUnapprove={noop}
+          onCancel={noop}
+          onAnalyze={noop}
+          canAnalyze={true}
+          onRemove={noop}
+        />
+      </ul>,
+    );
+
+    fireEvent.click(screen.getByLabelText("Inspect AI calls"));
+
+    expect(screen.getByText("AI calls (2)")).toBeInTheDocument();
+    expect(screen.getByText("Extraction")).toBeInTheDocument();
+    expect(screen.getByText("Extraction retry 1")).toBeInTheDocument();
+    expect(screen.getByText("extract these fields...")).toBeInTheDocument();
+    expect(screen.getByText("extract only currency...")).toBeInTheDocument();
+  });
+
+  it("labels a failed AI call distinctly and shows its error instead of a response", () => {
+    render(
+      <ul>
+        <BatchItemRow
+          item={reviewItem({
+            metrics: runMetrics({
+              model_calls: [
+                {
+                  prompt: "extract these fields...",
+                  response: null,
+                  error: "RuntimeError('model backend crashed')",
+                  phase: "extraction",
+                },
+              ],
+            }),
+          })}
+          onEditFilename={noop}
+          onApprove={noop}
+          onUnapprove={noop}
+          onCancel={noop}
+          onAnalyze={noop}
+          canAnalyze={true}
+          onRemove={noop}
+        />
+      </ul>,
+    );
+
+    fireEvent.click(screen.getByLabelText("Inspect AI calls"));
+
+    expect(screen.getByText("Extraction — failed")).toBeInTheDocument();
+    expect(screen.getByText("RuntimeError('model backend crashed')")).toBeInTheDocument();
+  });
+
+  it("labels the shortening call distinctly from an extraction retry", () => {
+    render(
+      <ul>
+        <BatchItemRow
+          item={reviewItem({
+            metrics: runMetrics({
+              model_calls: [
+                { prompt: "extract...", response: "{}", error: null, phase: "extraction" },
+                { prompt: "shorten...", response: "{}", error: null, phase: "shortening" },
+              ],
+            }),
+          })}
+          onEditFilename={noop}
+          onApprove={noop}
+          onUnapprove={noop}
+          onCancel={noop}
+          onAnalyze={noop}
+          canAnalyze={true}
+          onRemove={noop}
+        />
+      </ul>,
+    );
+
+    fireEvent.click(screen.getByLabelText("Inspect AI calls"));
+
+    expect(screen.getByText("Extraction")).toBeInTheDocument();
+    expect(screen.getByText("Shortening")).toBeInTheDocument();
+    expect(screen.queryByText("Extraction retry 1")).not.toBeInTheDocument();
+  });
+
+  it("clicking the AI-calls info button does not toggle the Run details disclosure", () => {
+    render(
+      <ul>
+        <BatchItemRow
+          item={reviewItem({
+            metrics: runMetrics({
+              model_calls: [
+                { prompt: "extract...", response: "{}", error: null, phase: "extraction" },
+              ],
+            }),
+          })}
+          onEditFilename={noop}
+          onApprove={noop}
+          onUnapprove={noop}
+          onCancel={noop}
+          onAnalyze={noop}
+          canAnalyze={true}
+          onRemove={noop}
+        />
+      </ul>,
+    );
+
+    const details = screen.getByText("Run details").closest("details");
+    expect(details).not.toHaveAttribute("open");
+
+    fireEvent.click(screen.getByLabelText("Inspect AI calls"));
+
+    expect(details).not.toHaveAttribute("open");
   });
 
   it("omits the tokens row when no token counts are available", () => {

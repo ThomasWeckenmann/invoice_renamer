@@ -229,7 +229,12 @@ def test_correction_and_hallucination_rate_are_unavailable_without_ground_truth(
 def test_correction_rate_ignores_invoices_with_no_labels_even_in_a_mixed_batch() -> None:
     # One invoice has a ground-truth label and is correct; the other has none at
     # all. The unlabeled invoice must not silently count as "no correction needed".
-    model = _ScriptedLanguageModel([_CORRECT_RESPONSE, _CORRECT_RESPONSE])
+    # 4 responses, not 2: _CORRECT_RESPONSE's invoice_date is deliberately null
+    # (see test_hallucination_rate_counts_a_value_where_ground_truth_says_null),
+    # which now costs each invoice one extra null-field retry call.
+    model = _ScriptedLanguageModel(
+        [_CORRECT_RESPONSE, _CORRECT_RESPONSE, _CORRECT_RESPONSE, _CORRECT_RESPONSE]
+    )
 
     result = run_benchmark(
         [FIXTURES_DIR / "selectable_text_en.pdf", FIXTURES_DIR / "selectable_text_de.pdf"],

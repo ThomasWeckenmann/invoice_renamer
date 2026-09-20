@@ -444,24 +444,194 @@ def test_blank_surviving_field_does_not_count_as_useful() -> None:
     assert len(model.prompts) == 2
 
 
-def test_already_valid_empty_response_needs_no_salvage() -> None:
-    empty = json.dumps(
-        {
-            "invoice_date": None,
-            "seller": None,
-            "product_summary": None,
-            "gross_total": None,
-            "currency": None,
-            "language": "unknown",
-        }
-    )
-    model = _ScriptedLanguageModel([empty])
+_EMPTY_JSON = json.dumps(
+    {
+        "invoice_date": None,
+        "seller": None,
+        "product_summary": None,
+        "gross_total": None,
+        "currency": None,
+        "language": "unknown",
+    }
+)
+
+
+def test_already_valid_empty_response_needs_no_salvage_but_still_gets_a_null_retry() -> None:
+    # A fully-null response is valid (no ValidationError, so no salvage), but
+    # still gets one bounded retry attempt for the missing useful fields. It
+    # stays null here too - that's not an error, so no warning is added.
+    model = _ScriptedLanguageModel([_EMPTY_JSON, _EMPTY_JSON])
 
     extraction = extract_invoice(_document(), model)
 
     assert extraction.seller is None
     assert extraction.warnings == []
+    assert len(model.prompts) == 2
+
+
+def test_zero_max_repair_attempts_skips_the_null_retry_even_with_missing_fields() -> None:
+    model = _ScriptedLanguageModel([_EMPTY_JSON])
+
+    extraction = extract_invoice(_document(), model, max_repair_attempts=0)
+
+    assert extraction.seller is None
+    assert extraction.warnings == []
     assert len(model.prompts) == 1
+
+
+def test_null_retry_recovers_a_value_the_first_pass_missed() -> None:
+    first = json.dumps({**json.loads(_VALID_JSON), "gross_total": None})
+    second = json.dumps({"gross_total": "2180"})
+    model = _ScriptedLanguageModel([first, second])
+
+    extraction = extract_invoice(_document(), model)
+
+    assert extraction.gross_total == Decimal("2180")
+    assert extraction.seller == "Apple"  # untouched, was already present
+    assert extraction.warnings == []
+    assert len(model.prompts) == 2
+
+
+def test_null_retry_prompt_asks_only_for_the_missing_fields() -> None:
+    first = json.dumps({**json.loads(_VALID_JSON), "gross_total": None, "currency": None})
+    model = _ScriptedLanguageModel([first, first])
+
+    extract_invoice(_document(), model, max_repair_attempts=1)
+
+    retry_prompt = model.prompts[1]
+    assert "ISO-4217 currency code" in retry_prompt
+    assert "the final invoice total" in retry_prompt
+    assert "the actual seller" not in retry_prompt  # seller was already found
+
+
+def test_null_retry_does_not_fire_for_a_zero_amount() -> None:
+    # 0 is a real value (not "no answer"), so it must never trigger a retry.
+    first = json.dumps({**json.loads(_VALID_JSON), "gross_total": "0"})
+    model = _ScriptedLanguageModel([first])
+
+    extraction = extract_invoice(_document(), model)
+
+    assert extraction.gross_total == Decimal("0")
+    assert len(model.prompts) == 1
+
+
+def test_null_retry_response_cannot_overwrite_an_already_good_field() -> None:
+    # Defensive: even if the model ignores the narrow prompt and echoes back
+    # a different value for a field it wasn't asked about, that value must be
+    # dropped rather than silently overwriting the already-good one.
+    first = json.dumps({**json.loads(_VALID_JSON), "gross_total": None})
+    second = json.dumps({"gross_total": "2180", "seller": "Sneaky"})
+    model = _ScriptedLanguageModel([first, second])
+
+    extraction = extract_invoice(_document(), model)
+
+    assert extraction.seller == "Apple"
+    assert extraction.gross_total == Decimal("2180")
+
+
+def test_null_retry_generation_failure_keeps_the_original_valid_result() -> None:
+    first = json.dumps({**json.loads(_VALID_JSON), "gross_total": None})
+    model = _ScriptedLanguageModel([first, RuntimeError("model backend crashed")])
+
+    extraction = extract_invoice(_document(), model)
+
+    assert extraction.seller == "Apple"
+    assert extraction.gross_total is None
+    assert extraction.warnings == []
+    assert len(model.prompts) == 2
+
+
+def test_null_retry_malformed_response_keeps_the_original_valid_result() -> None:
+    first = json.dumps({**json.loads(_VALID_JSON), "gross_total": None})
+    model = _ScriptedLanguageModel([first, "not json at all"])
+
+    extraction = extract_invoice(_document(), model)
+
+    assert extraction.seller == "Apple"
+    assert extraction.gross_total is None
+    assert extraction.warnings == []
+    assert len(model.prompts) == 2
+
+
+def test_null_retry_that_returns_an_invalid_value_keeps_the_original_valid_result() -> None:
+    first = json.dumps({**json.loads(_VALID_JSON), "currency": None})
+    second = json.dumps({"currency": "not-a-code"})
+    model = _ScriptedLanguageModel([first, second])
+
+    extraction = extract_invoice(_document(), model)
+
+    assert extraction.seller == "Apple"
+    assert extraction.currency is None
+    assert extraction.warnings == []
+    assert len(model.prompts) == 2
+
+
+def test_null_retry_independently_validates_each_field_in_one_reply() -> None:
+    # Regression: a reply mixing a recoverable field with a still-bad one
+    # must not let the bad one discard the good one.
+    first = json.dumps({**json.loads(_VALID_JSON), "gross_total": None, "currency": None})
+    second = json.dumps({"gross_total": "2180", "currency": "DE"})
+    model = _ScriptedLanguageModel([first, second])
+
+    extraction = extract_invoice(_document(), model)
+
+    assert extraction.gross_total == Decimal("2180")
+    assert extraction.currency is None
+    assert extraction.seller == "Apple"
+    assert extraction.warnings == []
+
+
+def test_salvage_repair_merges_a_narrow_reply_instead_of_replacing_the_extraction() -> None:
+    # Regression: a compliant model's reply to the narrow repair prompt
+    # contains ONLY the field(s) asked for - treating that reply as a
+    # complete new extraction would wipe every other already-good field.
+    invalid = json.dumps({**json.loads(_VALID_JSON), "currency": "not-a-code"})
+    narrow_reply = json.dumps({"currency": "EUR"})
+    model = _ScriptedLanguageModel([invalid, narrow_reply])
+
+    extraction = extract_invoice(_document(), model)
+
+    assert extraction.currency == "EUR"
+    assert extraction.seller == "Apple"
+    assert extraction.product_summary == "MacBook Air"
+    assert extraction.invoice_date == date(2026, 9, 12)
+    assert extraction.gross_total == Decimal("2180")
+    assert extraction.warnings == []
+
+
+def test_salvage_repair_independently_validates_each_rejected_field() -> None:
+    # Regression: a narrow reply covering two rejected fields, where one
+    # recovers and one is still bad, must keep the recovered one.
+    invalid = json.dumps(
+        {**json.loads(_VALID_JSON), "currency": "not-a-code", "language": "french"}
+    )
+    narrow_reply = json.dumps({"currency": "EUR", "language": "not-a-language"})
+    model = _ScriptedLanguageModel([invalid, narrow_reply])
+
+    extraction = extract_invoice(_document(), model)
+
+    assert extraction.currency == "EUR"
+    assert extraction.language.value == "unknown"
+    assert extraction.seller == "Apple"
+    assert not any("currency" in warning for warning in extraction.warnings)
+    assert any("language" in warning for warning in extraction.warnings)
+
+
+def test_a_rejected_field_and_a_null_field_are_repaired_in_the_same_call() -> None:
+    # Regression: with a budget of 1, a rejected field used to consume the
+    # sole repair attempt, leaving a separately-null useful field never asked
+    # about at all. Both must be askable in the same narrow call.
+    first = json.dumps({**json.loads(_VALID_JSON), "currency": "not-a-code", "gross_total": None})
+    narrow_reply = json.dumps({"currency": "EUR", "gross_total": "2180"})
+    model = _ScriptedLanguageModel([first, narrow_reply])
+
+    extraction = extract_invoice(_document(), model, max_repair_attempts=1)
+
+    assert extraction.currency == "EUR"
+    assert extraction.gross_total == Decimal("2180")
+    assert extraction.seller == "Apple"
+    assert len(model.prompts) == 2
+    assert extraction.warnings == []
 
 
 @pytest.mark.parametrize("non_object_json", ["[]", '"hello"', "42", "true", "null"])
@@ -481,6 +651,53 @@ def test_non_object_json_with_zero_repair_attempts_fails_fast() -> None:
 
     assert extraction.seller is None
     assert len(model.prompts) == 1
+
+
+def test_salvage_repair_prompt_is_narrowed_to_only_the_rejected_field() -> None:
+    invalid = json.dumps({**json.loads(_VALID_JSON), "currency": "not-a-code"})
+    model = _ScriptedLanguageModel([invalid, _VALID_JSON])
+
+    extract_invoice(_document(), model)
+
+    repair_prompt = model.prompts[1]
+    assert "ISO-4217 currency code" in repair_prompt
+    assert "REWRITTEN as YYYY-MM-DD" not in repair_prompt  # invoice_date instructions dropped
+    assert '"not-a-code"' in repair_prompt  # the model's own previous (rejected) value
+
+
+def test_salvage_repair_prompt_includes_the_currency_disambiguation_line() -> None:
+    invalid = json.dumps({**json.loads(_VALID_JSON), "currency": "not-a-code"})
+    model = _ScriptedLanguageModel([invalid, invalid])
+
+    extract_invoice(_document(), model, max_repair_attempts=1)
+
+    assert "not a language or country code" in model.prompts[1].casefold()
+
+
+def test_salvage_repair_prompt_for_multiple_fields_asks_for_all_in_one_call() -> None:
+    invalid = json.dumps(
+        {**json.loads(_VALID_JSON), "currency": "not-a-code", "language": "french"}
+    )
+    model = _ScriptedLanguageModel([invalid, invalid])
+
+    extract_invoice(_document(), model, max_repair_attempts=1)
+
+    repair_prompt = model.prompts[1]
+    assert "ISO-4217 currency code" in repair_prompt
+    assert '"de", "en", or "unknown"' in repair_prompt
+    assert len(model.prompts) == 2  # one call for both fields, not one per field
+
+
+def test_evidence_only_rejection_falls_back_to_the_full_repair_prompt() -> None:
+    # evidence isn't a field the model was ever asked to supply, so a narrow
+    # repair prompt would have nothing to target - the existing full prompt
+    # (which at least gives the model its bearings again) is used instead.
+    invalid = json.dumps({**json.loads(_VALID_JSON), "evidence": {"seller": "not-a-dict"}})
+    model = _ScriptedLanguageModel([invalid, invalid])
+
+    extract_invoice(_document(), model, max_repair_attempts=1)
+
+    assert "Validation error" in model.prompts[1]
 
 
 def test_malformed_first_response_then_a_salvageable_repaired_one() -> None:

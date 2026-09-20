@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from invoice_renamer.metrics.models import RunMetrics
+from invoice_renamer.metrics.models import ModelCall, RunMetrics
 
 
 def _metrics(**overrides: object) -> RunMetrics:
@@ -33,6 +33,7 @@ def test_defaults_are_empty_or_none() -> None:
     assert metrics.xml_profile_id is None
     assert metrics.xml_fields_used == []
     assert metrics.inference_ran is True
+    assert metrics.model_calls == []
 
 
 def test_a_historical_metrics_blob_without_xml_fields_deserializes_safely() -> None:
@@ -54,6 +55,33 @@ def test_a_historical_metrics_blob_without_xml_fields_deserializes_safely() -> N
     assert metrics.extraction_source == "model"
     assert metrics.xml_status == "none"
     assert metrics.inference_ran is True
+    assert metrics.model_calls == []
+
+
+def test_model_calls_round_trip_including_a_failed_one() -> None:
+    metrics = _metrics(
+        model_calls=[
+            {"prompt": "extract these fields...", "response": '{"seller": "Apple"}'},
+            {"prompt": "extract only currency...", "error": "RuntimeError('backend crashed')"},
+        ]
+    )
+
+    assert metrics.model_calls == [
+        ModelCall(prompt="extract these fields...", response='{"seller": "Apple"}'),
+        ModelCall(prompt="extract only currency...", error="RuntimeError('backend crashed')"),
+    ]
+
+
+def test_model_call_phase_defaults_to_extraction_but_accepts_shortening() -> None:
+    metrics = _metrics(
+        model_calls=[
+            {"prompt": "extract these fields..."},
+            {"prompt": "shorten these fields...", "phase": "shortening"},
+        ]
+    )
+
+    assert metrics.model_calls[0].phase == "extraction"
+    assert metrics.model_calls[1].phase == "shortening"
 
 
 def test_xml_only_run_round_trips() -> None:

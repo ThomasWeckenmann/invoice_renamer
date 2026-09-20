@@ -17,7 +17,12 @@ from pydantic import ValidationError
 from invoice_renamer.documents.models import NormalizedDocument
 from invoice_renamer.extraction.models import InvoiceExtraction
 from invoice_renamer.inference.language_model import LanguageModel
-from invoice_renamer.inference.prompts import build_extraction_prompt, build_repair_prompt
+from invoice_renamer.inference.prompts import (
+    FIELD_NAMES,
+    build_extraction_prompt,
+    build_field_repair_prompt,
+    build_repair_prompt,
+)
 
 
 def _merge_document_warnings(
@@ -79,7 +84,18 @@ def extract_invoice(
             continue
 
         if salvage_error is None:
-            return _merge_document_warnings(document.warnings, extraction)  # fully valid
+            # Fully valid - but a useful field can still be null (a
+            # deliberate "I'm not confident" answer, not an error). Ask about
+            # those too, narrowly, with whatever attempt budget remains.
+            final, _ = _repair_fields(
+                extraction,
+                document,
+                model,
+                _null_fields_for_retry(extraction),
+                attempts=attempts,
+                max_repair_attempts=max_repair_attempts,
+            )
+            return _merge_document_warnings(document.warnings, final)
 
         # Something was dropped to get here - keep it only if it's at least
         # as useful as anything salvaged already.
@@ -90,13 +106,35 @@ def extract_invoice(
 
         if attempts >= max_repair_attempts:
             return _merge_document_warnings(document.warnings, salvaged_fallback)
-        attempts += 1
-        try:
-            response = model.generate(build_repair_prompt(prompt, response, str(salvage_error)))
-        except Exception:
-            # The repair call is a pure bonus on top of an already-useful
-            # salvaged result - a generation failure here must not lose it.
-            return _merge_document_warnings(document.warnings, salvaged_fallback)
+
+        rejected = _rejected_fields_for_repair(salvage_error)
+        # Combine what pydantic rejected with any other useful field that's
+        # still null - one narrow call can recover both kinds at once instead
+        # of the null ones being silently skipped because the sole repair
+        # attempt went to the rejected field. `rejected` wins on overlap: a
+        # field that's both null and rejected has a real previous value and
+        # reason to show, which is more useful than the generic null message.
+        askable = {**_null_fields_for_retry(salvaged_fallback), **rejected}
+        if not askable:
+            # Nothing the model was ever asked to supply is askable here (the
+            # only rejection was e.g. evidence) - fall back to the full
+            # prompt, which is re-parsed as a complete extraction below.
+            attempts += 1
+            try:
+                response = model.generate(build_repair_prompt(prompt, response, str(salvage_error)))
+            except Exception:
+                return _merge_document_warnings(document.warnings, salvaged_fallback)
+            continue
+
+        salvaged_fallback, _ = _repair_fields(
+            salvaged_fallback,
+            document,
+            model,
+            askable,
+            attempts=attempts,
+            max_repair_attempts=max_repair_attempts,
+        )
+        return _merge_document_warnings(document.warnings, salvaged_fallback)
 
 
 # Instruct-tuned models commonly wrap JSON in a markdown code fence even when
@@ -168,6 +206,117 @@ def _salvage(data: dict[str, object], error: ValidationError) -> InvoiceExtracti
         for field, message in rejected.items()
     ]
     return extraction.model_copy(update={"warnings": warnings})
+
+
+def _rejected_fields_for_repair(error: ValidationError) -> dict[str, tuple[object, str]]:
+    """Maps each rejected field the model was actually asked to supply to its
+    (previous rejected value, validation message), for the narrow repair
+    prompt. A rejected evidence field is excluded - the model was never asked
+    to supply it, so there's nothing meaningful to ask it to correct."""
+    rejected: dict[str, tuple[object, str]] = {}
+    for detail in error.errors():
+        loc = detail["loc"]
+        field_name = loc[0] if loc else None
+        if not isinstance(field_name, str) or field_name not in FIELD_NAMES:
+            continue
+        rejected.setdefault(field_name, (detail["input"], str(detail["msg"])))
+    return rejected
+
+
+# A null is a legitimate, deliberate model answer ("I'm not confident, so I
+# won't guess"), not an error - so it gets a different message than a real
+# validation failure, and previous_value is always None (there's nothing to
+# show the model it got wrong, only that nothing came back).
+_NOT_FOUND_MESSAGE = (
+    "no value found - it may be labeled differently or appear elsewhere in the text above"
+)
+
+
+def _null_fields_for_retry(extraction: InvoiceExtraction) -> dict[str, tuple[object, str]]:
+    """Which of the 5 useful fields a fully-valid response still left null. A
+    0 amount is a real, meaningful value (not "no answer"), so - like
+    everywhere else in this module - _has_usable_value's None/blank-string
+    check is what decides what counts as missing here, not falsiness."""
+    return {
+        name: (None, _NOT_FOUND_MESSAGE)
+        for name in _USEFUL_SALVAGE_FIELDS
+        if not _has_usable_value(getattr(extraction, name))
+    }
+
+
+def _validate_and_merge(
+    base: InvoiceExtraction, data: dict[str, object], field_names: dict[str, tuple[object, str]]
+) -> tuple[InvoiceExtraction, frozenset[str]]:
+    """Validates each of field_names independently against `data` (where
+    present) and merges every field that validates with a usable value onto
+    `base`. Fields are validated one at a time - deliberately not as one
+    combined InvoiceExtraction - so one field's rejection can never discard a
+    sibling field's valid recovery in the same response. A field outside
+    field_names is never read from `data`, so a reply that includes an
+    unsolicited field (whether a compliant narrow answer or not) can never
+    overwrite a field the model wasn't asked about. Returns (merged, recovered
+    field names) - the caller uses the latter to stop re-asking about a field
+    that already came back good."""
+    updates: dict[str, object] = {}
+    for name in field_names:
+        if name not in data:
+            continue
+        try:
+            validated = InvoiceExtraction.model_validate({name: data[name]})
+        except ValidationError:
+            continue
+        value = getattr(validated, name)
+        if _has_usable_value(value):
+            updates[name] = value
+    if not updates:
+        return base, frozenset()
+    # A field that just recovered no longer needs its salvage warning (e.g.
+    # "currency: not a valid ISO 4217 code") hanging around as a stale caveat.
+    remaining_warnings = [
+        warning
+        for warning in base.warnings
+        if not any(warning.startswith(f"{name}: ") for name in updates)
+    ]
+    merged = base.model_copy(update={**updates, "warnings": remaining_warnings})
+    return merged, frozenset(updates)
+
+
+def _repair_fields(
+    extraction: InvoiceExtraction,
+    document: NormalizedDocument,
+    model: LanguageModel,
+    askable_fields: dict[str, tuple[object, str]],
+    *,
+    attempts: int,
+    max_repair_attempts: int,
+) -> tuple[InvoiceExtraction, int]:
+    """Repeatedly asks only for the given field(s) - each one either a value
+    pydantic rejected (previous value + validation message) or a still-null
+    useful field on an otherwise-valid response (previous value None, a
+    generic "not found" message) - merging every field that validates onto
+    `extraction` rather than treating the reply as a wholesale new one. A
+    compliant model's reply to this narrow a prompt only contains the
+    field(s) asked for, so parsing it as a full extraction would wipe every
+    other already-good field back to null (observed directly: qwen3-0.6b
+    found a date and a total on a narrow retry it had returned null for on
+    the first, 6-field pass). Bounded by the remaining attempt budget; a
+    field that recovers is dropped from what's asked for on the next round,
+    and any failure along the way (bad JSON, a generation error, a
+    still-invalid value) simply leaves `extraction` as it was and, if budget
+    remains, tries again for whatever is still missing."""
+    while askable_fields and attempts < max_repair_attempts:
+        attempts += 1
+        try:
+            response = model.generate(build_field_repair_prompt(document, askable_fields))
+            data = json.loads(_strip_markdown_fence(response))
+        except Exception:
+            continue
+        if isinstance(data, dict):
+            extraction, recovered = _validate_and_merge(extraction, data, askable_fields)
+            askable_fields = {
+                name: value for name, value in askable_fields.items() if name not in recovered
+            }
+    return extraction, attempts
 
 
 def _parse(response: str) -> tuple[InvoiceExtraction, ValidationError | None]:
