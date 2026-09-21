@@ -1,5 +1,15 @@
 # Changelog
 
+## Version 0.39.0 (2026-09-21, claude sonnet-5, nemotron 3 ultra)
+
+- Add a llama.cpp-backed extractor for the planned Transformers-to-llama.cpp runtime swap
+
+  Renders chat templates via a torch-free tokenizer and passes tokenized (not
+  raw-string) prompts to llama.cpp to avoid double-BOS/control-token issues, treats
+  output-limit truncation as an incomplete result without logging invoice content
+  to stderr, and gates loading on a catalog allowlist of verified chat formats
+  plus a real chat-template presence check. Not yet wired into the app.
+
 ## Version 0.38.0 (2026-09-21, claude sonnet-5, gpt-6-astra medium)
 
 - Add scripts/linux_workspace.sh to isolate Linux builds from a shared Mac checkout
