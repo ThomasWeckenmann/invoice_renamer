@@ -72,6 +72,24 @@ def test_pdf_is_still_the_default_extension() -> None:
     assert proposal.proposed_filename.endswith(".pdf")
 
 
+def test_jpeg_source_text_is_sanitized_exactly_like_pdf_source_text() -> None:
+    # document_format only ever picks the trailing extension - sanitization
+    # itself has no format-specific branch, so hostile OCR'd text from a
+    # JPEG must come out exactly as safe as the same text from a PDF.
+    proposal = build_filename_proposal(
+        _extraction(
+            seller="../../etc/passwd; rm -rf /",
+            product_summary="<script>alert(1)</script>",
+        ),
+        document_format=DocumentFormat.JPEG,
+    )
+
+    stem = proposal.proposed_filename.removesuffix(".jpg")
+    assert stem.replace("_", "").replace("-", "").isalnum()
+    for forbidden in "./;<>&*":
+        assert forbidden not in stem
+
+
 def test_short_fields_are_preferred_over_the_full_seller_and_product() -> None:
     proposal = build_filename_proposal(
         _extraction(seller_short="Amazon", product_summary_short="Galaxy Projektor")

@@ -210,9 +210,51 @@ def test_valid_jpeg_upload_is_accepted_and_completes(
     assert completed["status"] == "completed"
     assert completed["proposal"]["proposed_filename"] == "2026-09-12_Apple_MacBook-Air_2180-EUR.jpg"
     assert completed["metrics"]["pages_total"] == 1
+    assert completed["metrics"]["pages_ocr"] == [1]
     assert completed["metrics"]["extraction_source"] == "model"
     assert completed["metrics"]["xml_status"] == "none"
+    # A JPEG has no PDF container to have found XML in - these must never
+    # imply XML was considered, not just that it wasn't used.
+    assert completed["metrics"]["xml_attachment_name"] is None
+    assert completed["metrics"]["xml_profile_id"] is None
+    assert completed["metrics"]["xml_fields_used"] == []
     assert completed["error"] is None
+
+
+def test_a_pdf_job_and_a_jpeg_job_complete_correctly_through_the_same_coordinator(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # The single background worker thread processes jobs one at a time and
+    # reuses its own loaded model across jobs - this proves a JPEG job right
+    # after a PDF job (or vice versa) doesn't leak format-specific state
+    # (e.g. accidentally routing the JPEG through XML discovery, or the PDF
+    # losing its own extension).
+    entry = _entry(_MODEL_A)
+    _install(entry, tmp_path)
+    monkeypatch.setattr(
+        TransformersExtractor,
+        "load_installed",
+        lambda entry, data_dir, *, device: _FakeExtractor(_VALID_MODEL_RESPONSE),
+    )
+
+    pdf_submitted = _submit(client, _MODEL_A)
+    jpeg_submitted = _submit_jpeg(client, _MODEL_A)
+
+    pdf_completed = _poll_until(
+        client, pdf_submitted["id"], terminal_statuses=("completed", "failed")
+    )
+    jpeg_completed = _poll_until(
+        client, jpeg_submitted["id"], terminal_statuses=("completed", "failed")
+    )
+
+    assert pdf_completed["status"] == "completed"
+    assert pdf_completed["proposal"]["proposed_filename"].endswith(".pdf")
+    assert pdf_completed["metrics"]["xml_status"] == "none"
+
+    assert jpeg_completed["status"] == "completed"
+    assert jpeg_completed["proposal"]["proposed_filename"].endswith(".jpg")
+    assert jpeg_completed["metrics"]["xml_status"] == "none"
+    assert jpeg_completed["metrics"]["pages_ocr"] == [1]
 
 
 def test_corrupt_jpeg_upload_is_422_and_never_creates_a_job(

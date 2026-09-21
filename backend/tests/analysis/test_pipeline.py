@@ -120,6 +120,29 @@ def test_jpeg_happy_path_ocrs_the_image_and_produces_a_jpg_suffixed_filename() -
     assert metrics.xml_attachment_name is None
 
 
+def test_jpeg_ocr_text_actually_reaches_the_model_prompt() -> None:
+    # The happy-path test above proves the wiring works with a scripted
+    # response; this proves the real OCR'd fixture text - not just any page
+    # text - is what actually gets sent to the model, end to end.
+    image_bytes = (FIXTURES_DIR / "scanned_invoice.jpg").read_bytes()
+    model_response = _valid_model_response()
+
+    _, metrics = run_document_analysis(
+        image_bytes,
+        lambda: _FakeLanguageModel(model_response),
+        model_id="qwen3-0.6b",
+        model_revision=None,
+        shorten_enabled=False,
+        document_format=DocumentFormat.JPEG,
+    )
+
+    assert len(metrics.model_calls) == 1
+    prompt = metrics.model_calls[0].prompt
+    assert "Invoice #4004" in prompt
+    assert "Global Traders" in prompt
+    assert "275.00 EUR" in prompt
+
+
 def test_a_corrupt_jpeg_raises_instead_of_returning_a_synthesized_result() -> None:
     def _never_called() -> _FakeLanguageModel:
         raise AssertionError("model must not load for a JPEG that fails to open")

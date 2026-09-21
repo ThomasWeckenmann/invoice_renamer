@@ -1,9 +1,12 @@
 # JPG scan support
 
-Status: Blocks 1-4 implemented and verified (backend fully; frontend
-TypeScript/lint only - vitest and cargo test could not run natively in this
-sandbox, see Block 4's notes). Blocks 5-6 (happy-path e2e/mixed batch,
-security/sanity review) not started.
+Status: All 6 blocks implemented and verified. Backend fully verified in
+this sandbox throughout (pytest/ruff/mypy); the developer separately
+confirmed `npm run test` and `cargo test --lib` pass, and live-tested
+`.jpg`/`.jpeg` imports successfully. Two items remain genuinely
+unconfirmed, not failing: `npm run build`'s `vite build` step, and a batch
+mixing one PDF and one JPEG together (see Blocks 5-6's notes) - not yet
+moved to docs/plans_done/.
 
 ## Goal
 
@@ -373,6 +376,45 @@ next `cargo tauri dev`/`cargo tauri build`, since Blocks 1-3 changed
 Acceptance: the API-to-UI happy path proves a JPEG scan can be analyzed,
 reviewed, and renamed correctly, without regressing any PDF behavior.
 
+### Block 5 accepted, 2026-09-21
+
+Most of this block's automated coverage already existed from Blocks 1-2's
+own tests (`scanned_invoice.jpg` as the synthetic ground-truth fixture;
+`test_valid_jpeg_upload_is_accepted_and_completes` already submits through
+the full HTTP API, polls to completion, and checks the `.jpg` filename and
+`RunMetrics`). Two real gaps remained and were filled:
+
+- **"Exact OCR'd extraction" wasn't actually proven** - every existing test
+  used a scripted fake model response, which proves the wiring but not that
+  real OCR text reaches the model. Added
+  `test_pipeline.py::test_jpeg_ocr_text_actually_reaches_the_model_prompt`,
+  asserting the fixture's real OCR'd text (`Invoice #4004`, `Global
+  Traders`, `275.00 EUR`) appears verbatim in the captured model prompt.
+- **No test exercised a PDF and a JPEG through the same coordinator** -
+  added `test_analyses.py::test_a_pdf_job_and_a_jpeg_job_complete_correctly_through_the_same_coordinator`,
+  submitting one of each to the single background worker thread and
+  confirming neither job's format leaks into the other's result.
+  Also strengthened the existing JPEG happy-path test with
+  `xml_attachment_name`/`xml_profile_id`/`xml_fields_used` assertions at
+  the public API-contract level (previously only checked at the internal
+  pipeline level).
+
+Manual frontend verification: the developer reported `npm run test` and
+`cargo test --lib` passing on their own Mac, plus a live test importing and
+renaming a batch of `.jpg` and `.jpeg` files successfully. **Not
+explicitly confirmed: a single batch mixing one PDF and one JPEG together**
+(the plan's own third bullet) - the developer's reports covered
+same-format batches; worth one more manual check before treating this
+block as fully closed, though the new automated coordinator test above
+covers the equivalent backend behavior.
+
+Full backend suite: 464 passed, 2 skipped, `ruff format`/`ruff check`/
+`mypy src` all clean (one run hit a pre-existing, unrelated timing flake in
+`test_server.py::test_app_creation_does_not_import_the_inference_stack` -
+a subprocess-based test with a tight 5-second budget - confirmed
+reproducible only under this sandbox's heavier-than-usual load today, not
+caused by anything in this block; a clean re-run passed everything).
+
 ## Block 6: Security, sanity, and safety review
 
 - Treat JPEG bytes as untrusted input: enforce the pixel-dimension bound
@@ -394,6 +436,60 @@ reviewed, and renamed correctly, without regressing any PDF behavior.
 Acceptance: hostile or malformed image uploads have bounded, visible
 outcomes; PDF behavior is provably unchanged; all verification commands
 pass.
+
+### Block 6 accepted, 2026-09-21
+
+Unlike the ZUGFeRD plan's Block 6, this review found no new bugs to fix -
+every bullet's underlying guarantee already held by construction from
+Blocks 1-3 and the EXIF/CMYK follow-up fixes; this block added tests that
+prove each guarantee directly rather than just asserting behavior that
+happened to work:
+
+- **Dimension bound before full decode**: Block 1's own test only checked
+  that oversized input raised `ValueError`, which would pass even if a full
+  decode happened first. Added
+  `test_image_open.py::test_oversized_dimensions_are_rejected_before_a_full_decode`,
+  which patches `Image.Image.load` to record calls and asserts it was never
+  invoked. (First attempt was itself flaky: the test's own JPEG-construction
+  helper calls `Image.save()`, which calls `.load()` internally - building
+  the test fixture *after* patching miscounted that as a call from
+  `open_validated_jpeg`. Fixed by building the fixture bytes before
+  patching.)
+- **Polyglot inputs never misroute**: by construction, `%PDF-` and
+  `\xff\xd8\xff` are mutually exclusive as byte-string prefixes, so true
+  ambiguity is impossible - but nothing had tested the realistic polyglot
+  case (format bytes appearing *later* in a file of the other format, e.g.
+  a real scanned PDF's own embedded JPEG page image). Added
+  `test_format.py::test_pdf_containing_embedded_jpeg_bytes_is_still_classified_as_pdf`
+  and `test_jpeg_containing_pdf_looking_bytes_is_still_classified_as_jpeg`.
+- **Shared sanitizer, no new injection surface**: sanitization in
+  `naming/builder.py` has no format-specific branch - `document_format`
+  only ever picks the trailing extension - so this held by construction.
+  Added `test_builder.py::test_jpeg_source_text_is_sanitized_exactly_like_pdf_source_text`
+  to prove it directly, feeding path-traversal/shell/script-like text
+  through the JPEG code path and confirming the sanitizer's whitelist still
+  applies.
+- **RunMetrics never fabricates XML involvement for a JPEG run**: already
+  covered by Block 5's strengthened API-contract test
+  (`xml_attachment_name`/`xml_profile_id`/`xml_fields_used` all
+  null/empty) and Block 1's crash test (a failed JPEG never produces a
+  result object at all, so there's no synthesized metrics to mislabel).
+- **Verification commands**: full backend `pytest` (464 passed, 2 skipped),
+  `ruff format --check`, `ruff check`, and `mypy src` all clean. Frontend
+  `tsc -b`/`eslint .` clean in-sandbox; the developer separately confirmed
+  `npm run test` and `cargo test --lib` pass on their own Mac. `npm run
+  build` (the `vite build` step specifically) was not run by either this
+  session (blocked by the same missing `@rollup/rollup-linux-arm64-gnu`
+  sandbox issue as `vitest`) or confirmed by the developer - still open.
+  Worker sidecar smoke test: not re-run explicitly, but the developer's own
+  report of successfully live-testing `.jpg`/`.jpeg` batches through the
+  real app implies their sidecar was already rebuilt and working against
+  this backend code.
+
+Two items remain open, not because anything failed but because they were
+never explicitly exercised: **`npm run build`** and **a single batch mixing
+one PDF and one JPEG together** (Block 5's third bullet - see that
+block's note).
 
 ## Implementation bookkeeping
 

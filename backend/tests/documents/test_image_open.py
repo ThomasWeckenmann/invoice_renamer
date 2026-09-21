@@ -61,6 +61,35 @@ def test_dimensions_within_the_limit_are_accepted(monkeypatch: pytest.MonkeyPatc
     assert image.size == (20, 10)
 
 
+def test_oversized_dimensions_are_rejected_before_a_full_decode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A malicious small file could still decompress into a huge bitmap - the
+    # dimension bound only protects against that if it's checked from the
+    # header (Image.open's lazy .size) before .load() ever runs. Tracking
+    # .load() itself, rather than just asserting the ValueError, is what
+    # actually proves that ordering.
+    monkeypatch.setattr(image_open, "MAX_DIMENSION_PIXELS", 10)
+    # Built before patching .load() - Image.save() itself calls .load() on a
+    # freshly-created image before encoding it, which would otherwise be
+    # miscounted as a call made by open_validated_jpeg.
+    image_bytes = _jpeg_bytes((20, 10))
+
+    load_calls: list[None] = []
+    original_load = Image.Image.load
+
+    def _tracking_load(self: Image.Image) -> None:
+        load_calls.append(None)
+        original_load(self)
+
+    monkeypatch.setattr(Image.Image, "load", _tracking_load)
+
+    with pytest.raises(ValueError, match="exceed"):
+        open_validated_jpeg(image_bytes)
+
+    assert load_calls == []
+
+
 def _oriented_jpeg_bytes(upright_size: tuple[int, int]) -> bytes:
     """Builds a JPEG whose raw stored pixels simulate a camera-saved EXIF
     Orientation=6 photo: the true upright image (`upright_size`, with a
