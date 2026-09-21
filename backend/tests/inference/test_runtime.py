@@ -1,5 +1,7 @@
 """Tests for ModelRuntime's single-slot cache and its unload-before-load ordering."""
 
+import threading
+import time
 import weakref
 from pathlib import Path
 
@@ -67,6 +69,8 @@ def test_snapshot_is_empty_until_something_is_loaded(tmp_path: Path) -> None:
 
     assert snapshot.loaded_entry_id is None
     assert snapshot.device is None
+    assert snapshot.loading is False
+    assert snapshot.loading_entry_id is None
 
 
 def test_snapshot_reports_the_loaded_entry_and_device(tmp_path: Path) -> None:
@@ -146,6 +150,74 @@ def test_get_or_load_calls_the_loader_with_device_as_a_keyword(tmp_path: Path) -
     runtime.get_or_load(_entry(), tmp_path, "mps")
 
     assert captured["device"] == "mps"
+
+
+def test_loading_is_true_only_for_the_duration_of_the_load_call(tmp_path: Path) -> None:
+    observed: list[tuple[bool, str | None]] = []
+    release = threading.Event()
+
+    def fake_loader(entry: ModelCatalogEntry, data_dir: Path, *, device: str) -> _FakeExtractor:
+        observed.append((True, entry.id))  # loading must already be true here
+        release.wait(timeout=5)
+        return _FakeExtractor()
+
+    runtime = ModelRuntime(load_installed=fake_loader)  # type: ignore[arg-type]
+    assert runtime.snapshot().loading is False
+
+    thread = threading.Thread(target=runtime.get_or_load, args=(_entry("model-a"), tmp_path, "cpu"))
+    thread.start()
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline and not runtime.snapshot().loading:
+        time.sleep(0.01)
+
+    snapshot = runtime.snapshot()
+    assert snapshot.loading is True
+    assert snapshot.loading_entry_id == "model-a"
+
+    release.set()
+    thread.join(timeout=5)
+
+    final = runtime.snapshot()
+    assert final.loading is False
+    assert final.loading_entry_id is None
+    assert final.loaded_entry_id == "model-a"
+
+
+def test_loading_clears_after_a_failed_load(tmp_path: Path) -> None:
+    def failing_loader(entry: ModelCatalogEntry, data_dir: Path, *, device: str) -> _FakeExtractor:
+        raise RuntimeError("boom")
+
+    runtime = ModelRuntime(load_installed=failing_loader)  # type: ignore[arg-type]
+
+    with pytest.raises(RuntimeError):
+        runtime.get_or_load(_entry("model-a"), tmp_path, "cpu")
+
+    snapshot = runtime.snapshot()
+    assert snapshot.loading is False
+    assert snapshot.loading_entry_id is None
+    assert snapshot.loaded_entry_id is None
+
+
+def test_unload_clears_the_loaded_model(tmp_path: Path) -> None:
+    def fake_loader(entry: ModelCatalogEntry, data_dir: Path, *, device: str) -> _FakeExtractor:
+        return _FakeExtractor()
+
+    runtime = ModelRuntime(load_installed=fake_loader)  # type: ignore[arg-type]
+    runtime.get_or_load(_entry("model-a"), tmp_path, "cpu")
+    assert runtime.loaded_entry_id() == "model-a"
+
+    runtime.unload()
+
+    assert runtime.loaded_entry_id() is None
+    assert runtime.snapshot().device is None
+
+
+def test_unload_is_a_no_op_when_nothing_is_loaded(tmp_path: Path) -> None:
+    runtime = ModelRuntime(load_installed=lambda entry, data_dir, *, device: _FakeExtractor())  # type: ignore[arg-type]
+
+    runtime.unload()  # must not raise
+
+    assert runtime.loaded_entry_id() is None
 
 
 def test_default_loader_resolves_to_transformers_extractor_load_installed(

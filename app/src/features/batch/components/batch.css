@@ -80,6 +80,16 @@
   font-weight: 600;
 }
 
+.memory-status__item--warning {
+  color: var(--warn-ink);
+  font-weight: 600;
+}
+
+.memory-status__item--critical {
+  color: var(--danger-ink);
+  font-weight: 600;
+}
+
 /* buttons */
 
 .btn {

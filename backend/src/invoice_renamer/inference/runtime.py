@@ -24,6 +24,8 @@ class RuntimeSnapshot:
 
     loaded_entry_id: str | None
     device: str | None
+    loading: bool
+    loading_entry_id: str | None
 
 
 _DEVICE_BY_BACKEND = {
@@ -76,16 +78,18 @@ class LoadInstalledFn(Protocol):
 
 class ModelRuntime:
     """Not thread-safe by design: only the analysis worker thread (one thread,
-    one job at a time) ever calls get_or_load(), so no internal lock is
-    needed. loaded_entry_id() and snapshot() are the exceptions - plain
-    attribute reads safe to call from another thread (e.g. a request handler
-    sampling live memory) since a snapshot that's a call away from stale is
-    already the expected shape of that kind of check."""
+    one job at a time) ever calls get_or_load() or unload(), so no internal
+    lock is needed. loaded_entry_id() and snapshot() are the exceptions -
+    plain attribute reads safe to call from another thread (e.g. a request
+    handler sampling live memory) since a snapshot that's a call away from
+    stale is already the expected shape of that kind of check."""
 
     def __init__(self, *, load_installed: LoadInstalledFn | None = None) -> None:
         self._loaded: tuple[str, str | None] | None = None
         self._extractor: TransformersExtractor | None = None
         self._device: str | None = None
+        self._loading = False
+        self._loading_entry_id: str | None = None
         # Lazily resolved (not a bound default argument) so tests can
         # monkeypatch TransformersExtractor.load_installed after construction,
         # same pattern as installer.py's FetchFn.
@@ -98,7 +102,12 @@ class ModelRuntime:
     def snapshot(self) -> RuntimeSnapshot:
         """Small immutable copy of what's currently loaded, safe to read from
         another thread (see class docstring)."""
-        return RuntimeSnapshot(loaded_entry_id=self.loaded_entry_id(), device=self._device)
+        return RuntimeSnapshot(
+            loaded_entry_id=self.loaded_entry_id(),
+            device=self._device,
+            loading=self._loading,
+            loading_entry_id=self._loading_entry_id,
+        )
 
     def get_or_load(
         self, entry: ModelCatalogEntry, data_dir: Path, device: str
@@ -113,10 +122,21 @@ class ModelRuntime:
             from invoice_renamer.inference.transformers_extractor import TransformersExtractor
 
             load_installed = TransformersExtractor.load_installed
-        self._extractor = load_installed(entry, data_dir, device=device)
+        self._loading, self._loading_entry_id = True, entry.id
+        try:
+            self._extractor = load_installed(entry, data_dir, device=device)
+        finally:
+            # Cleared on a raising load too, so a failed load never leaves the
+            # status line stuck on "Loading..." forever.
+            self._loading, self._loading_entry_id = False, None
         self._loaded = key
         self._device = device
         return self._extractor
+
+    def unload(self) -> None:
+        """Force-unload the current model without loading a replacement. A
+        no-op when nothing is loaded."""
+        self._unload_current()
 
     def _unload_current(self) -> None:
         if self._extractor is None:

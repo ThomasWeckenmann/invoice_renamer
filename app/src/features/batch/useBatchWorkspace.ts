@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cancelJob, fetchJob, submitAnalysis } from "../../lib/api/analyses";
+import { ApiError } from "../../lib/api/client";
 import type { AnalysisJobView, JobStatus } from "../../lib/api/types";
 import type { BatchItem, BatchItemStatus, ImportedFile } from "./types";
 
@@ -33,6 +34,15 @@ function statusFromJob(status: JobStatus): BatchItemStatus {
   }
 }
 
+/** Lets a caller (e.g. the "unload after batch" tracker) watch a run's
+ * submissions from the moment each one starts, not just once it resolves -
+ * otherwise a sibling upload still in flight would be invisible to it,
+ * making the run look finished before every item actually submitted. */
+export interface SubmissionTracker {
+  beginSubmission: () => string;
+  settleSubmission: (token: string, jobId: string | null | undefined) => void;
+}
+
 export interface UseBatchWorkspaceResult {
   items: BatchItem[];
   addFiles: (files: ImportedFile[]) => void;
@@ -43,8 +53,8 @@ export interface UseBatchWorkspaceResult {
   unapproveItem: (id: string) => void;
   approveAll: () => void;
   cancelItem: (id: string) => void;
-  rerunItem: (id: string, modelId: string, shortenFields: boolean) => void;
-  startAnalysis: (modelId: string, shortenFields: boolean) => void;
+  rerunItem: (id: string, modelId: string, shortenFields: boolean, tracker?: SubmissionTracker) => void;
+  startAnalysis: (modelId: string, shortenFields: boolean, tracker?: SubmissionTracker) => void;
   isAnalyzing: boolean;
   pendingCount: number;
   approvedCount: number;
@@ -205,10 +215,21 @@ export function useBatchWorkspace(): UseBatchWorkspaceResult {
   );
 
   const submitItem = useCallback(
-    (item: BatchItem, modelId: string, shortenFields: boolean) => {
+    (item: BatchItem, modelId: string, shortenFields: boolean, tracker?: SubmissionTracker) => {
       const generation = bumpGeneration(item.id);
+      // Reserved synchronously, before the upload starts - a caller tracking
+      // this run must see it as outstanding from this point, not only once
+      // the upload resolves to a real job id (see SubmissionTracker's note).
+      const token = tracker?.beginSubmission();
       void submitAnalysis(item.file, modelId, shortenFields)
         .then((job) => {
+          // A real backend job now exists regardless of whether this item's
+          // own generation is still current - a caller tracking it for
+          // "unload after batch" purposes must keep watching it even after
+          // a cancel/remove/rerun stops this hook's own polling below.
+          if (token !== undefined) {
+            tracker!.settleSubmission(token, job.id);
+          }
           if (!isCurrentGeneration(item.id, generation)) {
             // Cancelled/removed/rerun while the upload was in flight: this
             // is the first point a real job id exists, so it's the first
@@ -223,6 +244,13 @@ export function useBatchWorkspace(): UseBatchWorkspaceResult {
           pollJob(item.id, job.id, generation);
         })
         .catch((err) => {
+          // A lost response or server failure may hide an accepted job.
+          // Only explicit client rejections establish that no job was created.
+          if (token !== undefined) {
+            const rejected =
+              err instanceof ApiError && err.status >= 400 && err.status < 500 && err.status !== 408;
+            tracker!.settleSubmission(token, rejected ? null : undefined);
+          }
           if (!isCurrentGeneration(item.id, generation)) {
             return;
           }
@@ -233,7 +261,7 @@ export function useBatchWorkspace(): UseBatchWorkspaceResult {
   );
 
   const startAnalysis = useCallback(
-    (modelId: string, shortenFields: boolean) => {
+    (modelId: string, shortenFields: boolean, tracker?: SubmissionTracker) => {
       const toSubmit = itemsRef.current.filter((item) => item.status === "pending");
       if (toSubmit.length === 0) {
         return;
@@ -242,14 +270,14 @@ export function useBatchWorkspace(): UseBatchWorkspaceResult {
         prev.map((item) => (item.status === "pending" ? { ...item, status: "queued" } : item)),
       );
       for (const item of toSubmit) {
-        submitItem(item, modelId, shortenFields);
+        submitItem(item, modelId, shortenFields, tracker);
       }
     },
     [submitItem],
   );
 
   const rerunItem = useCallback(
-    (id: string, modelId: string, shortenFields: boolean) => {
+    (id: string, modelId: string, shortenFields: boolean, tracker?: SubmissionTracker) => {
       const item = itemsRef.current.find((candidate) => candidate.id === id);
       if (!item) {
         return;
@@ -266,7 +294,7 @@ export function useBatchWorkspace(): UseBatchWorkspaceResult {
         metrics: null,
         error: null,
       });
-      submitItem(item, modelId, shortenFields);
+      submitItem(item, modelId, shortenFields, tracker);
     },
     [clearPoll, submitItem, updateItem],
   );

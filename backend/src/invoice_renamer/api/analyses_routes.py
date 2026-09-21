@@ -1,9 +1,11 @@
 """API routes for submitting invoice analysis jobs and polling their status/result."""
 
+import logging
 import threading
+import time
 from collections import deque
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from uuid import uuid4
@@ -30,9 +32,15 @@ from invoice_renamer.models.installer import is_installed
 from invoice_renamer.naming.schema import FilenameProposal
 
 analyses_router = APIRouter()
+logger = logging.getLogger(__name__)
 
 _MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 _MAX_PENDING_BYTES = 500 * 1024 * 1024  # ~10 max-size documents queued/running at once
+_IDLE_UNLOAD_SECONDS = 5 * 60
+# How often the worker rechecks elapsed idle time while a model is loaded and
+# nothing is queued - independent of the injected clock, so real polling stays
+# responsive to a notify() without needing a precisely-timed wakeup.
+_IDLE_POLL_SECONDS = 5.0
 
 
 class JobStatus(str, Enum):
@@ -96,6 +104,17 @@ def _entry_or_404(model_id: str) -> ModelCatalogEntry:
     return entry
 
 
+@dataclass
+class _UnloadCommand:
+    """Handoff for an explicit unload request: the requesting thread blocks on
+    `done` while the worker thread - the only thread allowed to mutate
+    ModelRuntime - actually performs the unload and fills in the result."""
+
+    done: threading.Event = field(default_factory=threading.Event)
+    result: str | None = None  # "ok" or "busy", set by the worker
+    error: str | None = None
+
+
 class AnalysisCoordinator:
     """Serializes analysis on one worker, with queue membership and job status
     changed under the same lock so cancellation cannot race job admission."""
@@ -106,6 +125,7 @@ class AnalysisCoordinator:
         *,
         load_installed: LoadInstalledFn | None = None,
         capabilities_fn: Callable[[], SystemCapabilities] | None = None,
+        clock: Callable[[], float] | None = None,
     ) -> None:
         self._lock = threading.Lock()
         self._condition = threading.Condition(self._lock)
@@ -114,6 +134,13 @@ class AnalysisCoordinator:
         self._data_dir = data_dir
         self._runtime = ModelRuntime(load_installed=load_installed)
         self._capabilities_fn = capabilities_fn or (lambda: detect_capabilities(disk_path=data_dir))
+        self._clock = clock or time.monotonic
+        self._last_activity = self._clock()
+        self._pending_unloads: list[_UnloadCommand] = []
+        # Set/cleared only by the worker thread, under self._lock, around the
+        # job body it runs outside the lock - see request_unload()'s docstring
+        # for why this can't be inferred from _pending_unloads alone.
+        self._running_job_id: str | None = None
         self._worker = threading.Thread(target=self._worker_loop, daemon=True)
         self._worker.start()
 
@@ -122,6 +149,33 @@ class AnalysisCoordinator:
         sampler - see ModelRuntime.snapshot() for why this is safe to call
         from a request-handling thread."""
         return self._runtime.snapshot()
+
+    def request_unload(self) -> None:
+        """Blocks the calling (request-handling) thread until the worker
+        thread has processed an explicit unload command - ModelRuntime is
+        only ever mutated from the worker thread, matching get_or_load().
+
+        A running job is only ever visible *before* the worker loop reaches
+        its pending-command check - by the time the worker gets there, a job
+        it was running has necessarily already finished. So "busy" for a
+        RUNNING job has to be decided here, immediately, under the same lock
+        the worker uses to set/clear _running_job_id; a QUEUED job is instead
+        rechecked by the worker itself right before it would unload, since a
+        job can be submitted in the window between this check and that one.
+
+        Raises HTTPException(409) if a job is queued/running, or
+        HTTPException(500) if the unload itself raised."""
+        command = _UnloadCommand()
+        with self._condition:
+            if self._running_job_id is not None or self._queue:
+                raise HTTPException(409, "cannot unload while a job is queued or running")
+            self._pending_unloads.append(command)
+            self._condition.notify()
+        command.done.wait()
+        if command.error is not None:
+            raise HTTPException(500, command.error)
+        if command.result == "busy":
+            raise HTTPException(409, "cannot unload while a job is queued or running")
 
     def submit(
         self,
@@ -187,57 +241,140 @@ class AnalysisCoordinator:
 
     def _worker_loop(self) -> None:
         while True:
-            with self._condition:
-                while not self._queue:
-                    self._condition.wait()
-                job_id = self._queue.popleft()
-                job = self._jobs[job_id]
-                job.status = JobStatus.RUNNING
-            entry = _entry_or_404(job.model_id)
-            # Clear this local reference after each job so the runtime can free
-            # the previous model before loading a different one.
-            model: LanguageModel | None = None
+            job = self._next_step()
+            if job is not None:
+                self._run_job(job)
 
-            def load_model() -> LanguageModel:
-                # Deferred until run_document_analysis finds it actually needs
-                # inference - a job that a complete XML extraction can answer
-                # alone must never load a model at all.
-                nonlocal model
-                device = select_device(self._capabilities_fn())
-                model = self._runtime.get_or_load(entry, self._data_dir, device)
-                return model
+    def _next_step(self) -> AnalysisJob | None:
+        """Waits for, and handles, whatever the worker has to do next: an
+        explicit unload command, an idle-timeout unload, or a queued job.
 
-            try:
-                assert job.document_bytes is not None
-                proposal, metrics = run_document_analysis(
-                    job.document_bytes,
-                    load_model,
-                    model_id=entry.id,
-                    model_revision=entry.revision,
-                    shorten_enabled=job.shorten_fields,
-                    document_format=job.document_format,
-                )
-            except Exception as exc:
-                with self._lock:
-                    job.status, job.error, job.document_bytes = JobStatus.FAILED, str(exc), None
-                continue
-            finally:
-                # Drops this loop's own reference to the extractor (success or
-                # failure) so that if the *next* job needs a different model,
-                # ModelRuntime._unload_current()'s del of its own reference is
-                # truly the last one, and the old weights are actually freed
-                # before the new model loads - not just "unload requested."
-                del model
-            with self._lock:
-                if job.cancel_requested:
-                    job.status = JobStatus.CANCELLED
+        A command or an idle unload is fully decided *and executed* here,
+        still holding self._lock - not just decided here and carried out
+        after releasing it. Releasing the lock in between would let submit()
+        admit a new job into the now-empty-looking queue in the gap, which
+        would make the unload run anyway despite that job, wasting an
+        unload+immediate-reload on it and breaking the queued-job guarantee
+        this is supposed to provide. The unload itself (gc.collect(), and on
+        GPU builds a cache-clear call) briefly blocks submit()/cancel()/get()
+        for its duration - acceptable, since correctness here matters more
+        than that brief availability cost, unlike the job body below, which
+        can run for a long time and is deliberately run outside the lock.
+        """
+        with self._condition:
+            while not self._queue and not self._pending_unloads:
+                # Rechecked fresh at the top of every iteration - the only
+                # point guaranteed to hold self._lock with nothing released
+                # since. A wait() call below releases the lock while blocked;
+                # it can return (by notify *or* by its internal timeout
+                # firing) at essentially the same moment another thread's
+                # submit() finishes admitting a job, so the elapsed-idle
+                # check right after a wait() timeout can't be trusted
+                # without also reconfirming queue/pending here - otherwise a
+                # job admitted in that gap could still get unloaded out from
+                # under it despite the while condition having let it through.
+                loaded = self._runtime.loaded_entry_id() is not None
+                if loaded and self._clock() - self._last_activity >= _IDLE_UNLOAD_SECONDS:
+                    self._run_idle_unload_locked()
+                    return None
+                # Nothing loaded means nothing to time out - wait indefinitely;
+                # only a notify (a submission or an unload command) matters.
+                self._condition.wait(timeout=_IDLE_POLL_SECONDS if loaded else None)
+                # Woken by notify or by timing out - loop back to the top,
+                # where both the while condition and the check above are
+                # re-evaluated against current state, not stale pre-wait state.
+
+            if self._pending_unloads:
+                commands, self._pending_unloads = self._pending_unloads, []
+                if self._queue:
+                    for command in commands:
+                        command.result = "busy"
+                        command.done.set()
                 else:
-                    job.status, job.proposal, job.metrics = (
-                        JobStatus.COMPLETED,
-                        proposal,
-                        metrics,
-                    )
-                job.document_bytes = None
+                    self._run_unload_commands_locked(commands)
+                return None
+
+            job_id = self._queue.popleft()
+            job = self._jobs[job_id]
+            job.status = JobStatus.RUNNING
+            self._running_job_id = job_id
+            return job
+
+    def _run_job(self, job: AnalysisJob) -> None:
+        entry = _entry_or_404(job.model_id)
+        # Clear this local reference after each job so the runtime can free
+        # the previous model before loading a different one.
+        model: LanguageModel | None = None
+
+        def load_model() -> LanguageModel:
+            # Deferred until run_document_analysis finds it actually needs
+            # inference - a job that a complete XML extraction can answer
+            # alone must never load a model at all.
+            nonlocal model
+            device = select_device(self._capabilities_fn())
+            model = self._runtime.get_or_load(entry, self._data_dir, device)
+            return model
+
+        try:
+            assert job.document_bytes is not None
+            proposal, metrics = run_document_analysis(
+                job.document_bytes,
+                load_model,
+                model_id=entry.id,
+                model_revision=entry.revision,
+                shorten_enabled=job.shorten_fields,
+                document_format=job.document_format,
+            )
+        except Exception as exc:
+            with self._lock:
+                job.status, job.error, job.document_bytes = JobStatus.FAILED, str(exc), None
+                self._last_activity = self._clock()
+                self._running_job_id = None
+            return
+        finally:
+            # Drops this loop's own reference to the extractor (success or
+            # failure) so that if the *next* job needs a different model,
+            # ModelRuntime._unload_current()'s del of its own reference is
+            # truly the last one, and the old weights are actually freed
+            # before the new model loads - not just "unload requested."
+            del model
+        with self._lock:
+            if job.cancel_requested:
+                job.status = JobStatus.CANCELLED
+            else:
+                job.status, job.proposal, job.metrics = (
+                    JobStatus.COMPLETED,
+                    proposal,
+                    metrics,
+                )
+            job.document_bytes = None
+            self._last_activity = self._clock()
+            self._running_job_id = None
+
+    def _run_unload_commands_locked(self, commands: list[_UnloadCommand]) -> None:
+        """Caller must hold self._lock - see _next_step()."""
+        try:
+            self._runtime.unload()
+        except Exception as exc:
+            logger.exception("explicit model unload failed")
+            for command in commands:
+                command.error = str(exc)
+                command.done.set()
+            return
+        for command in commands:
+            command.result = "ok"
+            command.done.set()
+
+    def _run_idle_unload_locked(self) -> None:
+        """Caller must hold self._lock - see _next_step()."""
+        try:
+            self._runtime.unload()
+        except Exception:
+            # ModelRuntime clears its residency state before the exception-
+            # prone cache-clearing calls, so loaded_entry_id() already
+            # reflects "unloaded" here - this can't repeat into a tight loop,
+            # it's just logged so a leaked GPU cache isn't silent.
+            logger.exception("idle model unload failed")
 
 
 @analyses_router.post("/analyses", status_code=202)

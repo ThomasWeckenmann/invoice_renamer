@@ -1,4 +1,5 @@
-"""API route exposing a live memory snapshot for the running worker."""
+"""API routes exposing a live memory snapshot and manual model unloading for
+the running worker."""
 
 from fastapi import APIRouter, Request
 
@@ -12,4 +13,15 @@ memory_router = APIRouter()
 def get_memory(request: Request) -> MemorySnapshot:
     coordinator: AnalysisCoordinator = request.app.state.analysis_coordinator
     snapshot = coordinator.runtime_snapshot()
-    return sample_memory(runtime_device=snapshot.device)
+    return sample_memory(
+        runtime_device=snapshot.device,
+        loaded_entry_id=snapshot.loaded_entry_id,
+        loading=snapshot.loading,
+        loading_entry_id=snapshot.loading_entry_id,
+    )
+
+
+@memory_router.delete("/memory/loaded-model", status_code=204)
+def unload_model(request: Request) -> None:
+    coordinator: AnalysisCoordinator = request.app.state.analysis_coordinator
+    coordinator.request_unload()

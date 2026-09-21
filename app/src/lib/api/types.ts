@@ -133,6 +133,9 @@ export interface MemorySnapshot {
   system_available_bytes: number;
   worker_rss_bytes: number;
   runtime_device: string | null;
+  loaded_entry_id: string | null;
+  loading: boolean;
+  loading_entry_id: string | null;
   gpu: GpuMemorySnapshot | null;
   gpu_error: string | null;
 }

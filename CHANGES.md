@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 0.37.0 (2026-09-21, claude sonnet-5)
+
+- Add model loading/unload visibility and controls to the memory status line
+
+  Show model residency, memory tooltips, and RAM colors.
+  Unload after 5 minutes idle or after a batch when enabled before analysis.
+  Uncertain uploads defer to idle unloading, and late upload callbacks cannot
+  restart unload tracking after unmount.
+
 ## Version 0.36.1 (2026-09-21, claude sonnet-5)
 
 - bugfix: make the sidecar worker self-exit if its parent process dies abruptly

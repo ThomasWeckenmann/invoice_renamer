@@ -7,6 +7,7 @@ import { itemHasIssue } from "../types";
 import { useBatchWorkspace } from "../useBatchWorkspace";
 import { useModelCatalog } from "../useModelCatalog";
 import { useRenameTransaction } from "../useRenameTransaction";
+import { useUnloadAfterBatch } from "../useUnloadAfterBatch";
 import { BatchList } from "./BatchList";
 import { BatchProgressBar } from "./BatchProgressBar";
 import { ImportDropzone } from "./ImportDropzone";
@@ -25,9 +26,14 @@ export function BatchWorkspace() {
   const [issuesOnly, setIssuesOnly] = useState(false);
   const [modelsCollapsed, setModelsCollapsed] = useState(false);
   const [confirmingUndo, setConfirmingUndo] = useState(false);
+  // Read fresh at submit time (see handleAnalyze/handleAnalyzeItem) - later
+  // toggles must only affect runs started after the toggle, not ones already
+  // in flight.
+  const [unloadAfterBatch, setUnloadAfterBatch] = useState(false);
   const catalog = useModelCatalog();
   const batch = useBatchWorkspace();
   const rename = useRenameTransaction();
+  const unloadTracking = useUnloadAfterBatch();
 
   // Qwen is the default pick when it's already installed, so a returning
   // user doesn't have to reselect a model every launch.
@@ -57,13 +63,15 @@ export function BatchWorkspace() {
 
   const handleAnalyze = () => {
     if (selectedModelId) {
-      batch.startAnalysis(selectedModelId, shortenFields);
+      batch.startAnalysis(selectedModelId, shortenFields, unloadAfterBatch ? unloadTracking : undefined);
     }
   };
 
   const handleAnalyzeItem = (id: string) => {
     if (selectedModelId && canAnalyzeItem) {
-      batch.rerunItem(id, selectedModelId, shortenFields);
+      // A single analyze/re-run is its own one-item run for unload-tracking
+      // purposes, same as a full batch.
+      batch.rerunItem(id, selectedModelId, shortenFields, unloadAfterBatch ? unloadTracking : undefined);
     }
   };
 
@@ -99,7 +107,7 @@ export function BatchWorkspace() {
         <div className="batch-section__header">
           <h2>Model</h2>
           <div className="batch-section__header-end">
-            <MemoryStatus />
+            <MemoryStatus models={catalog.models} />
             {modelsCollapsed && (
               <span className="batch-section__header-note">
                 {selectedModel ? selectedModel.entry.display_name : "None selected"}
@@ -117,6 +125,19 @@ export function BatchWorkspace() {
             </button>
           </div>
         </div>
+        {unloadTracking.trackingError && (
+          <p role="alert" className="batch-workspace__note">
+            {unloadTracking.trackingError}
+          </p>
+        )}
+        {unloadTracking.unloadError && !unloadTracking.trackingError && (
+          <p role="alert" className="batch-workspace__note">
+            Couldn't unload the model after the batch: {unloadTracking.unloadError}{" "}
+            <button type="button" className="btn sm" onClick={unloadTracking.retryUnload}>
+              Retry
+            </button>
+          </p>
+        )}
         {!modelsCollapsed && (
           <ModelSelector
             models={catalog.models}
@@ -187,6 +208,21 @@ export function BatchWorkspace() {
                 />
                 <span className="batch-workspace__toggle-dot" aria-hidden="true" />
                 Shorten Names
+              </label>
+              <label
+                className={`btn batch-workspace__toggle${
+                  unloadAfterBatch ? " batch-workspace__toggle--on" : ""
+                }`}
+                title="Unload the model when the next batch finishes. Enable before starting analysis; changes do not affect batches already running."
+              >
+                <input
+                  type="checkbox"
+                  className="batch-workspace__toggle-input"
+                  checked={unloadAfterBatch}
+                  onChange={(event) => setUnloadAfterBatch(event.target.checked)}
+                />
+                <span className="batch-workspace__toggle-dot" aria-hidden="true" />
+                Unload after batch
               </label>
               <button
                 type="button"

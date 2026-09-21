@@ -1,10 +1,10 @@
-/** Tests for the persistent memory-status readout, in particular that a
- * failed GPU measurement is shown explicitly rather than silently omitted
- * like the ordinary "no GPU to report" case. */
+/** Tests for the persistent memory-status readout: model residency wording,
+ * a failed GPU measurement shown explicitly rather than silently omitted,
+ * per-stat tooltips, and RAM usage color coding. */
 
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { MemorySnapshot } from "../../../lib/api/types";
+import type { MemorySnapshot, ModelStatusEntry } from "../../../lib/api/types";
 import type { UseMemoryStatusResult } from "../useMemoryStatus";
 import * as useMemoryStatusModule from "../useMemoryStatus";
 import { MemoryStatus } from "./MemoryStatus";
@@ -18,11 +18,38 @@ function snapshot(overrides: Partial<MemorySnapshot> = {}): MemorySnapshot {
     system_available_bytes: 8_000_000_000,
     worker_rss_bytes: 1_000_000_000,
     runtime_device: "mps",
+    loaded_entry_id: null,
+    loading: false,
+    loading_entry_id: null,
     gpu: null,
     gpu_error: null,
     ...overrides,
   };
 }
+
+function modelEntry(id: string, displayName: string): ModelStatusEntry {
+  return {
+    entry: {
+      id,
+      display_name: displayName,
+      license: "apache-2.0",
+      repository: `example-org/${id}`,
+      revision: "a".repeat(40),
+      files: [],
+      memory_tier: "small",
+      prompt_template: null,
+      description: null,
+    },
+    status: "installed",
+    compatible: true,
+    compatibility_reasons: [],
+    files_done: null,
+    files_total: null,
+    error: null,
+  };
+}
+
+const MODELS = [modelEntry("granite-3.3-2b", "Granite 3.3 2B Instruct")];
 
 function mockStatus(overrides: Partial<UseMemoryStatusResult> = {}) {
   vi.mocked(useMemoryStatusModule.useMemoryStatus).mockReturnValue({
@@ -37,7 +64,7 @@ describe("MemoryStatus", () => {
   it("shows a measuring placeholder before the first snapshot arrives", () => {
     mockStatus({ snapshot: null });
 
-    render(<MemoryStatus />);
+    render(<MemoryStatus models={MODELS} />);
 
     expect(screen.getByText("Measuring memory…")).toBeInTheDocument();
   });
@@ -54,7 +81,7 @@ describe("MemoryStatus", () => {
       }),
     });
 
-    render(<MemoryStatus />);
+    render(<MemoryStatus models={MODELS} />);
 
     expect(screen.getByText(/GPU \(Metal\)/)).toBeInTheDocument();
   });
@@ -64,7 +91,7 @@ describe("MemoryStatus", () => {
       snapshot: snapshot({ gpu: null, gpu_error: "backend rejected the query mid-unload" }),
     });
 
-    render(<MemoryStatus />);
+    render(<MemoryStatus models={MODELS} />);
 
     const gpuItem = screen.getByText("GPU unavailable");
     expect(gpuItem).toHaveAttribute("title", "backend rejected the query mid-unload");
@@ -73,8 +100,216 @@ describe("MemoryStatus", () => {
   it("omits the GPU line entirely when there is no GPU and no error", () => {
     mockStatus({ snapshot: snapshot({ runtime_device: "cpu", gpu: null, gpu_error: null }) });
 
-    render(<MemoryStatus />);
+    render(<MemoryStatus models={MODELS} />);
 
     expect(screen.queryByText(/GPU/)).not.toBeInTheDocument();
+  });
+
+  it('shows "No model loaded" when nothing is resident or loading', () => {
+    mockStatus({ snapshot: snapshot({ loaded_entry_id: null, loading: false }) });
+
+    render(<MemoryStatus models={MODELS} />);
+
+    expect(screen.getByText("No model loaded")).toBeInTheDocument();
+  });
+
+  it("shows the resolved display name while loading", () => {
+    mockStatus({
+      snapshot: snapshot({ loading: true, loading_entry_id: "granite-3.3-2b" }),
+    });
+
+    render(<MemoryStatus models={MODELS} />);
+
+    expect(screen.getByText("Loading Granite 3.3 2B Instruct…")).toBeInTheDocument();
+  });
+
+  it("falls back to the raw id when the catalog lookup misses", () => {
+    mockStatus({
+      snapshot: snapshot({ loading: true, loading_entry_id: "unknown-model" }),
+    });
+
+    render(<MemoryStatus models={MODELS} />);
+
+    expect(screen.getByText("Loading unknown-model…")).toBeInTheDocument();
+  });
+
+  it("shows the resolved display name once loaded", () => {
+    mockStatus({
+      snapshot: snapshot({ loading: false, loaded_entry_id: "granite-3.3-2b" }),
+    });
+
+    render(<MemoryStatus models={MODELS} />);
+
+    expect(screen.getByText("Loaded Granite 3.3 2B Instruct")).toBeInTheDocument();
+  });
+
+  it("suppresses active loading wording and marks residency as last-known while stale", () => {
+    mockStatus({
+      snapshot: snapshot({ loading: true, loading_entry_id: "granite-3.3-2b" }),
+      stale: true,
+      error: "worker unreachable",
+    });
+
+    render(<MemoryStatus models={MODELS} />);
+
+    expect(screen.queryByText(/^Loading/)).not.toBeInTheDocument();
+    expect(screen.getByText("No model loaded (last known)")).toBeInTheDocument();
+  });
+
+  it("marks a stale loaded reading as last-known rather than dropping it", () => {
+    mockStatus({
+      snapshot: snapshot({ loading: false, loaded_entry_id: "granite-3.3-2b" }),
+      stale: true,
+      error: "worker unreachable",
+    });
+
+    render(<MemoryStatus models={MODELS} />);
+
+    expect(screen.getByText("Loaded Granite 3.3 2B Instruct (last known)")).toBeInTheDocument();
+  });
+
+  it("gives each stat an explanatory tooltip", () => {
+    mockStatus({
+      snapshot: snapshot({
+        gpu: {
+          backend: "cuda",
+          allocated_bytes: 2_000_000_000,
+          reserved_bytes: 2_500_000_000,
+          driver_allocated_bytes: null,
+        },
+      }),
+    });
+
+    render(<MemoryStatus models={MODELS} />);
+
+    expect(screen.getByText(/^RAM/)).toHaveAttribute(
+      "title",
+      "System RAM used / total — includes all apps and the OS.",
+    );
+    expect(screen.getByText(/^Worker/)).toHaveAttribute(
+      "title",
+      "Python process RAM — excludes the app window and shell.",
+    );
+    expect(screen.getByText(/^GPU \(CUDA\)/)).toHaveAttribute(
+      "title",
+      "GPU tensors / reserved VRAM — reserved already includes tensors.",
+    );
+  });
+
+  it("appends the Apple Silicon shared-memory note only for an MPS GPU", () => {
+    mockStatus({
+      snapshot: snapshot({
+        gpu: { backend: "mps", allocated_bytes: null, reserved_bytes: null, driver_allocated_bytes: 1 },
+      }),
+    });
+
+    render(<MemoryStatus models={MODELS} />);
+
+    expect(screen.getByText(/^GPU \(Metal\)/)).toHaveAttribute(
+      "title",
+      "GPU allocations (shared RAM, incl. cache) — uses the Mac's shared memory pool. " +
+        "GPU memory shares system RAM; these figures are not additive.",
+    );
+  });
+
+  it("suppresses per-item tooltips while stale so the outer stale tooltip isn't shadowed", () => {
+    // A child's own title always wins over an ancestor's for the tooltip a
+    // browser shows on hover - so a stale per-item tooltip here would hide
+    // the outer "last measurement failed" title on that item permanently.
+    mockStatus({
+      snapshot: snapshot({
+        gpu: {
+          backend: "cuda",
+          allocated_bytes: 2_000_000_000,
+          reserved_bytes: 2_500_000_000,
+          driver_allocated_bytes: null,
+        },
+      }),
+      stale: true,
+      error: "worker unreachable",
+    });
+
+    render(<MemoryStatus models={MODELS} />);
+
+    expect(screen.getByText(/^RAM/)).not.toHaveAttribute("title");
+    expect(screen.getByText(/^Worker/)).not.toHaveAttribute("title");
+    expect(screen.getByText(/^GPU \(CUDA\)/)).not.toHaveAttribute("title");
+  });
+
+  it("an existing GPU error tooltip still takes priority over the static explanation", () => {
+    mockStatus({
+      snapshot: snapshot({ gpu: null, gpu_error: "backend rejected the query mid-unload" }),
+    });
+
+    render(<MemoryStatus models={MODELS} />);
+
+    expect(screen.getByText("GPU unavailable")).toHaveAttribute(
+      "title",
+      "backend rejected the query mid-unload",
+    );
+  });
+
+  it("keeps the GPU error tooltip even while the overall reading is stale", () => {
+    // Unlike the new static tooltips, gpu_error describes this specific
+    // snapshot's own failed GPU read, not the freshness of the latest poll -
+    // it must stay visible rather than deferring to the outer stale title.
+    mockStatus({
+      snapshot: snapshot({ gpu: null, gpu_error: "backend rejected the query mid-unload" }),
+      stale: true,
+      error: "worker unreachable",
+    });
+
+    render(<MemoryStatus models={MODELS} />);
+
+    expect(screen.getByText("GPU unavailable")).toHaveAttribute(
+      "title",
+      "backend rejected the query mid-unload",
+    );
+  });
+
+  it("colors the RAM item critical when available memory is very low", () => {
+    mockStatus({
+      snapshot: snapshot({ system_total_bytes: 16_000_000_000, system_available_bytes: 1_000_000_000 }),
+    });
+
+    render(<MemoryStatus models={MODELS} />);
+
+    expect(screen.getByText(/^RAM/)).toHaveClass("memory-status__item--critical");
+  });
+
+  it("colors the RAM item as a warning in the mid-low range", () => {
+    mockStatus({
+      snapshot: snapshot({ system_total_bytes: 16_000_000_000, system_available_bytes: 3_000_000_000 }),
+    });
+
+    render(<MemoryStatus models={MODELS} />);
+
+    expect(screen.getByText(/^RAM/)).toHaveClass("memory-status__item--warning");
+  });
+
+  it("does not color the RAM item when memory is plentiful", () => {
+    mockStatus({
+      snapshot: snapshot({ system_total_bytes: 16_000_000_000, system_available_bytes: 12_000_000_000 }),
+    });
+
+    render(<MemoryStatus models={MODELS} />);
+
+    const ramItem = screen.getByText(/^RAM/);
+    expect(ramItem).not.toHaveClass("memory-status__item--warning");
+    expect(ramItem).not.toHaveClass("memory-status__item--critical");
+  });
+
+  it("never colors the RAM item while the reading is stale, regardless of the last-known percentage", () => {
+    mockStatus({
+      snapshot: snapshot({ system_total_bytes: 16_000_000_000, system_available_bytes: 1_000_000_000 }),
+      stale: true,
+      error: "worker unreachable",
+    });
+
+    render(<MemoryStatus models={MODELS} />);
+
+    const ramItem = screen.getByText(/^RAM/);
+    expect(ramItem).not.toHaveClass("memory-status__item--warning");
+    expect(ramItem).not.toHaveClass("memory-status__item--critical");
   });
 });

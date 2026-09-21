@@ -32,6 +32,12 @@ class MemorySnapshot(BaseModel):
     # None until a model has actually loaded onto a device - no accelerator
     # is probed or initialized before then.
     runtime_device: str | None
+    # The currently cached model, or None if nothing is resident.
+    loaded_entry_id: str | None = None
+    # True only for the duration of an in-flight load (first load or a
+    # switch) - distinct from "nothing loaded" and "something loaded".
+    loading: bool = False
+    loading_entry_id: str | None = None
     gpu: GpuMemorySnapshot | None
     # Set when a GPU provider raised, without failing the rest of the snapshot.
     gpu_error: str | None = None
@@ -80,6 +86,9 @@ def _gpu_memory(device: str) -> tuple[GpuMemorySnapshot | None, str | None]:
 def sample_memory(
     *,
     runtime_device: str | None,
+    loaded_entry_id: str | None = None,
+    loading: bool = False,
+    loading_entry_id: str | None = None,
     system_memory_fn: Callable[[], tuple[int, int]] = _system_memory,
     worker_rss_fn: Callable[[], int] = _worker_rss,
     gpu_memory_fn: Callable[[str], tuple[GpuMemorySnapshot | None, str | None]] = _gpu_memory,
@@ -103,6 +112,9 @@ def sample_memory(
         system_available_bytes=system_available,
         worker_rss_bytes=worker_rss,
         runtime_device=runtime_device,
+        loaded_entry_id=loaded_entry_id,
+        loading=loading,
+        loading_entry_id=loading_entry_id,
         gpu=gpu,
         gpu_error=gpu_error,
     )

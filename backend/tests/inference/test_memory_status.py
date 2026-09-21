@@ -56,6 +56,31 @@ def test_system_and_worker_readings_are_passed_through() -> None:
     assert snapshot.sampled_at > 0
 
 
+def test_residency_and_loading_fields_default_to_unloaded() -> None:
+    snapshot = sample_memory(
+        runtime_device=None, system_memory_fn=_system_memory, worker_rss_fn=_worker_rss
+    )
+
+    assert snapshot.loaded_entry_id is None
+    assert snapshot.loading is False
+    assert snapshot.loading_entry_id is None
+
+
+def test_residency_and_loading_fields_are_passed_through() -> None:
+    snapshot = sample_memory(
+        runtime_device="cpu",
+        loaded_entry_id="model-a",
+        loading=True,
+        loading_entry_id="model-b",
+        system_memory_fn=_system_memory,
+        worker_rss_fn=_worker_rss,
+    )
+
+    assert snapshot.loaded_entry_id == "model-a"
+    assert snapshot.loading is True
+    assert snapshot.loading_entry_id == "model-b"
+
+
 def test_mps_gpu_reading_is_reported_under_driver_allocated_bytes() -> None:
     def gpu(device: str) -> tuple[GpuMemorySnapshot | None, str | None]:
         assert device == "mps"
