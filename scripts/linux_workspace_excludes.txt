@@ -1,0 +1,28 @@
+# rsync --exclude-from list for scripts/linux_workspace.sh.
+#
+# Applied on both transfer and deletion (plain --delete, never
+# --delete-excluded), so anything listed here is left alone in the mirror
+# no matter what the checkout side looks like. That is what lets Linux
+# build/dependency output accumulate in the mirror across repeated syncs
+# without ever being copied from, or deleted because of, the checkout.
+/.git
+.env
+.env.local
+/local_benchmark_data
+/_temp
+/backend/.venv
+/backend/.pyinstaller
+/backend/models
+/app/node_modules
+/app/dist
+/src-tauri/target
+/src-tauri/gen
+/src-tauri/resources
+__pycache__/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+*.py[cod]
+*.pyo
+*.tsbuildinfo
+.DS_Store

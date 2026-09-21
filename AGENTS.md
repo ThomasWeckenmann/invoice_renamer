@@ -56,6 +56,55 @@ Use at most one optional follow-up paragraph per version entry, and keep that en
 
 Keep private invoice samples outside Git and reference them through a local test configuration.
 
+## Linux build isolation
+
+When this checkout is shared between a Mac and a Linux container (e.g. this
+project's devcontainer, mounted from a Mac host over virtiofs),
+`backend/.venv`, `app/node_modules`, `src-tauri/target`, and the staged
+worker (`src-tauri/resources/worker`) are ordinary paths inside the checkout
+that both sides use — the sandbox's own Linux kernel makes execution look
+isolated, but the filesystem underneath is not. Installing dependencies or
+building directly in the checkout on Linux overwrites the Mac's copies with
+Linux-specific ones, and the next macOS build/run breaks until they're
+reinstalled there. This actually happened, repeatedly, before
+`scripts/linux_workspace.sh` existed:
+
+- `cargo build`/`test`/`clippy`/`fmt` in `src-tauri/` re-ran `build.rs`,
+  which copied the Linux-built sidecar into a path the Mac's own
+  `cargo tauri dev` had staged its macOS sidecar into, so the next native
+  run on the Mac tried to exec a Linux ELF binary and failed opaquely.
+- `npm install` / `rm -rf node_modules && npm install` in `app/` installed
+  npm's Linux-only optional native packages (`@rollup/rollup-linux-*`,
+  esbuild) over the Mac's `darwin-*` ones, since npm only installs the
+  current platform's variant — the Mac's next `npm run dev`/`cargo tauri dev`
+  then failed with `Cannot find module '@rollup/rollup-darwin-*'`.
+- `backend/.venv` is literally the Mac's own macOS virtualenv
+  (`pyvenv.cfg` pointed at a macOS Python interpreter path), reached through
+  the same mount. A bare `uv run pytest`/`ruff`/`mypy` resynced it with Linux
+  wheels (torch especially, pinned to a separate CPU-only index for Linux),
+  breaking the Mac's backend until it was re-synced there.
+
+Run backend/frontend/Rust commands through `scripts/linux_workspace.sh`
+instead of directly, whenever you're on Linux and unsure whether the
+checkout is shared this way (assume it is in this devcontainer):
+
+```
+scripts/linux_workspace.sh backend uv run pytest
+scripts/linux_workspace.sh app npm run build
+scripts/linux_workspace.sh src-tauri cargo check
+scripts/linux_workspace.sh . scripts/build_worker_sidecar.sh
+scripts/linux_workspace.sh . cargo tauri dev
+```
+
+It mirrors the checkout into `~/.cache/invoice-renamer-linux-workspace/...`
+(outside the shared mount) and runs the given command there. It's a
+snapshot: it re-syncs before every run, so re-run it after editing source;
+there's no live sync, and a long-running command (a dev server) holds the
+mirror's lock until it exits. `scripts/build_worker_sidecar.sh` itself
+refuses to run on Linux outside the mirror (checks `$LINUX_WORKSPACE_ACTIVE`,
+which the wrapper sets). macOS commands are unaffected and run as documented
+in `README.md` — this exists only for the Linux side of the shared checkout.
+
 ## Planning
 
 When planning multi-block features, always:
@@ -63,6 +112,11 @@ When planning multi-block features, always:
 - add a block at the end which covers security/sanity/safety
 
 ## Verification Commands
+
+On macOS, run these directly. On Linux, prefix each with
+`scripts/linux_workspace.sh <dir>` instead of `cd`-ing there yourself — see
+[Linux build isolation](#linux-build-isolation) — e.g.
+`scripts/linux_workspace.sh backend uv run pytest`.
 
 Backend (from `backend/`):
 

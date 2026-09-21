@@ -50,6 +50,37 @@ On first launch, use the model manager in the app to download a local model befo
 
 Re-run step 1 after changing backend (Python) code — the worker is a separate build artifact and isn't rebuilt automatically by `cargo tauri dev`. It's built for the machine you build it on, and the Tauri build refuses to package a worker built for a different architecture.
 
+### Linux, when this checkout is shared with a Mac
+
+Skip this if you're on a plain Linux install. It applies to setups like this
+project's devcontainer, where the same checkout is mounted into both a Mac
+host and a Linux container: `backend/.venv`, `app/node_modules`,
+`src-tauri/target`, and the staged worker are ordinary paths inside the
+checkout, so a Linux install or build writes Linux-specific files into paths
+the Mac side also uses, and the next `cargo tauri dev` on the Mac breaks.
+
+`scripts/linux_workspace.sh` avoids that by mirroring the checkout into a
+Linux-local directory outside the shared mount and running your command
+there, leaving the checkout's own `.venv`/`node_modules`/`target`/staged
+worker untouched. Run the same three steps through it instead:
+
+```
+scripts/linux_workspace.sh . scripts/build_worker_sidecar.sh
+scripts/linux_workspace.sh app npm install
+scripts/linux_workspace.sh . cargo tauri dev
+```
+
+General form: `scripts/linux_workspace.sh {.|backend|app|src-tauri} <command...>`
+— the first argument picks the working directory inside the mirror, the rest
+is run there as-is (e.g. `scripts/linux_workspace.sh backend uv run pytest`).
+
+It's a snapshot, not a live editing workspace: each run re-syncs the mirror
+from the checkout before running your command, so edit the checkout as usual
+and re-run the wrapper to pick up changes — there's no automatic live sync,
+and a running `cargo tauri dev` holds the mirror until you stop it. Commands
+run directly in the checkout (not through the wrapper) are not protected by
+any of this.
+
 ## Building a standalone app
 
 `cargo tauri dev` above is the easiest way to develop or just use the app day to day. To get a real app you can launch directly (e.g. by double-clicking), build a release bundle instead, after completing steps 1 and 2 above:

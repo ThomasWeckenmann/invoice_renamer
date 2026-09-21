@@ -2,7 +2,32 @@
 # Builds the FastAPI worker into the distribution directory the Tauri app bundles.
 set -euo pipefail
 
+# A signal sent to just this script's pid (not its process group - e.g. via
+# scripts/linux_workspace.sh's `exec`, which hands this script that pid
+# directly) would otherwise stop here without reaching the uv/PyInstaller
+# child below, orphaning it. Forward to the whole group instead.
+forward_signal_to_group() {
+  trap - TERM INT
+  kill -- -$$ 2>/dev/null || true
+}
+trap forward_signal_to_group TERM INT
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+if [ "$(uname -s)" = "Linux" ] && [ -z "${LINUX_WORKSPACE_ACTIVE:-}" ]; then
+  # Matches scripts/linux_workspace.sh's own shared-mount check: only a
+  # checkout actually reachable from another host (virtiofs, 9p, a network
+  # share) risks colliding with a macOS build of the same repo. A checkout
+  # on a plain local filesystem has no such risk and builds directly.
+  repo_fstype="$(findmnt -no FSTYPE -T "$repo_root" 2>/dev/null || true)"
+  case "$repo_fstype" in
+    virtiofs | 9p | fuse.* | cifs | smb3 | nfs | nfs4)
+      echo "error: this checkout is on a $repo_fstype mount, which may be shared with a macOS checkout of the same repo. Build the worker through the isolated mirror instead:" >&2
+      echo "  scripts/linux_workspace.sh . scripts/build_worker_sidecar.sh" >&2
+      exit 1
+      ;;
+  esac
+fi
 backend_dir="$repo_root/backend"
 resources_dir="$repo_root/src-tauri/resources/worker"
 target_marker="$repo_root/src-tauri/resources/worker.target"

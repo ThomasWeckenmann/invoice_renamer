@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 0.38.0 (2026-09-21, claude sonnet-5, gpt-6-astra medium)
+
+- Add scripts/linux_workspace.sh to isolate Linux builds from a shared Mac checkout
+
+  Run Linux installs/builds in a local mirror to preserve the Mac's
+  venv/node_modules/target/staged worker. Reject inherited cache overrides,
+  including uppercase NPM_CONFIG_CACHE, and stop command process groups
+  before releasing the mirror lock on interruption.
+
 ## Version 0.37.0 (2026-09-21, claude sonnet-5)
 
 - Add model loading/unload visibility and controls to the memory status line
