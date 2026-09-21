@@ -73,7 +73,7 @@ def test_happy_path_produces_the_same_proposal_as_the_e2e_test() -> None:
     assert metrics.inference_ms >= 0
     assert metrics.model_id == "qwen3-0.6b"
     assert metrics.model_revision == "c1899de289a04d12100db370d81485cdf75e47ca"
-    assert metrics.provider == "transformers"
+    assert metrics.provider == "llama.cpp"
     assert metrics.extraction_source == "model"
     assert metrics.xml_status == "none"
     assert metrics.inference_ran is True

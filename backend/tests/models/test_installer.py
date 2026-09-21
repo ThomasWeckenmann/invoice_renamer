@@ -340,6 +340,81 @@ def test_install_may_finalize_false_raises_and_does_not_write_marker(tmp_path: P
         assert (install_dir / path).read_bytes() == content
 
 
+# --- per-file source override -----------------------------------------------
+
+
+def test_effective_source_defaults_to_the_entrys_own_repository_and_revision() -> None:
+    entry = _entry()
+    file = ModelFile(path="config.json", sha256="a" * 64, size_bytes=0)
+
+    assert installer._effective_source(entry, file) == (entry.repository, entry.revision)
+
+
+def test_effective_source_uses_the_files_own_override_when_set() -> None:
+    entry = _entry()
+    file = ModelFile(
+        path="tokenizer.json",
+        sha256="a" * 64,
+        size_bytes=0,
+        repository="base-model-org/base-model",
+        revision="f" * 40,
+    )
+
+    assert installer._effective_source(entry, file) == ("base-model-org/base-model", "f" * 40)
+
+
+def test_install_fetches_a_file_without_an_override_from_the_entrys_own_source(
+    tmp_path: Path,
+) -> None:
+    entry = _entry()
+    captured: list[tuple[str, str]] = []
+
+    def fetch(repository: str, revision: str, filename: str, dest_dir: Path) -> Path:
+        captured.append((repository, revision))
+        dest = dest_dir / filename
+        dest.write_bytes(_FILE_CONTENTS[filename])
+        return dest
+
+    install(entry, tmp_path, fetch=fetch)
+
+    assert captured == [(entry.repository, entry.revision)] * len(_FILE_CONTENTS)
+
+
+def test_install_fetches_a_file_with_an_override_from_its_own_source_not_the_entrys(
+    tmp_path: Path,
+) -> None:
+    tokenizer_content = b"tokenizer-bytes-from-a-different-repo"
+    entry = _entry(
+        files=[
+            ModelFile(
+                path="model.bin",
+                sha256=hashlib.sha256(_FILE_CONTENTS["model.bin"]).hexdigest(),
+                size_bytes=len(_FILE_CONTENTS["model.bin"]),
+            ),
+            ModelFile(
+                path="tokenizer.json",
+                sha256=hashlib.sha256(tokenizer_content).hexdigest(),
+                size_bytes=len(tokenizer_content),
+                repository="base-model-org/base-model",
+                revision="f" * 40,
+            ),
+        ]
+    )
+    captured: list[tuple[str, str, str]] = []
+
+    def fetch(repository: str, revision: str, filename: str, dest_dir: Path) -> Path:
+        captured.append((repository, revision, filename))
+        content = _FILE_CONTENTS["model.bin"] if filename == "model.bin" else tokenizer_content
+        (dest_dir / filename).write_bytes(content)
+        return dest_dir / filename
+
+    install(entry, tmp_path, fetch=fetch)
+
+    assert (entry.repository, entry.revision, "model.bin") in captured
+    assert ("base-model-org/base-model", "f" * 40, "tokenizer.json") in captured
+    assert is_installed(entry, tmp_path) is True
+
+
 # --- remove --------------------------------------------------------------
 
 

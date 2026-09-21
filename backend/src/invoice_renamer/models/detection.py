@@ -1,13 +1,14 @@
 """Detects the host's memory, free disk, and best-guess acceleration backend.
 
-Acceleration detection stays a torch-free heuristic on purpose: this runs on
-every model-catalog request, and importing torch just to answer one costs
-about a second of startup the app otherwise defers until a model is actually
-loaded. The platform/binary sniffing below can only say what hardware is
-present, not what the installed torch wheel supports - a CPU-only build on a
+Acceleration detection stays a binding-free heuristic on purpose: this runs on
+every model-catalog request, and importing llama_cpp just to answer one costs
+startup time the app otherwise defers until a model is actually loaded. The
+platform/binary sniffing below can only say what hardware is present, not
+whether the installed llama.cpp binding supports it - a CPU-only build on a
 machine with `nvidia-smi` still reports CUDA here. `select_device()` in
-inference/runtime.py is what confirms the guess against torch and downgrades
-to CPU, at the point where torch is being imported anyway.
+inference/runtime.py is what confirms the guess against the installed
+binding and downgrades to CPU, at the point where llama_cpp is being
+imported anyway.
 """
 
 import platform

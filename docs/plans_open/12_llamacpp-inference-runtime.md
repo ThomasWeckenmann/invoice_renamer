@@ -2,9 +2,19 @@
 
 Status: Block 1 code complete (`inference/llamacpp_extractor.py` +
 `tests/inference/test_llamacpp_extractor.py`, all unit tests/ruff/mypy
-green). Live verification against a real GGUF file is deferred to Block 6
-by user decision (test project, no real-weight download for now) — see the
-note at the end of Block 1.
+green). Live verification against a real GGUF file was originally deferred
+to Block 6 by user decision (test project, no real-weight download for
+now) but happened sooner, during Block 2 — see the notes at the end of
+Block 1 and Block 2. Block 2 code complete (design revised 2026-09-21 to
+pin GGUF and tokenizer/template assets to separate, independently-verified
+sources per file instead of one bundle repository or an app-published
+mirror; `models/gguf_catalog.py` added with real, live-verified entries for
+both shipped models, `models/catalog.py`/`models/installer.py` updated for
+per-file source overrides, all unit tests/ruff/mypy green) — see the note
+at the end of Block 2. Block 3 code complete (`ModelRuntime`,
+`select_device()`, and the app pipeline's `provider` literal swapped to
+llama.cpp; all unit tests/ruff/mypy green) — see the note at the end of
+Block 3.
 
 ## Goal
 
@@ -203,6 +213,45 @@ downloading multi-GB files in CI.
   level (e.g. something in the Q4_K_M/Q5_K_M range, matching what the
   `_temp` note observed as Ollama's own default for Llama3.2) is a Block 2
   implementation decision to make empirically, not fixed here.
+- **GGUF and tokenizer/template assets are pinned to separate sources, per
+  file — revised before Block 2 implementation began.** The installer's
+  original single-repository-per-entry contract assumed one pinned Hugging
+  Face repository would hold everything a catalog entry needs. Checking the
+  real Hugging Face API (not assumed) found no reputable GGUF release for
+  either model that also ships the tokenizer/chat-template files
+  `transformers.AutoTokenizer` needs: Qwen's own `Qwen3-0.6B-GGUF`,
+  `unsloth/Qwen3-0.6B-GGUF`, `bartowski/Qwen_Qwen3-0.6B-GGUF`,
+  `second-state/Qwen3-0.6B-GGUF`, `mradermacher/Qwen3-0.6B-GGUF`,
+  `ggml-org/Qwen3-0.6B-GGUF`, and Granite's equivalents
+  (`ibm-granite/granite-3.3-2b-instruct-GGUF`,
+  `bartowski/ibm-granite_granite-3.3-2b-instruct-GGUF`,
+  `unsloth/granite-3.3-2b-instruct-GGUF`) all ship only `.gguf` files (plus
+  at most a bare `config.json`) — llama.cpp itself reads the tokenizer from
+  GGUF metadata, so repackagers have no reason to also ship separate
+  tokenizer files. The fallback originally written here — publishing a new
+  app-controlled Hugging Face bundle repo per model — was rejected by user
+  decision: it would make this project responsible for hosting duplicate
+  copies of third-party model weights indefinitely and maintaining their
+  provenance, a substantial ongoing cost to work around what is otherwise a
+  narrow installer limitation. Instead, `ModelFile` (`models/catalog.py`)
+  gains its own optional `repository`/`revision` override, defaulting to
+  `None` (meaning "use the entry's own `repository`/`revision`"), and
+  `models/installer.py` resolves each file's effective source independently
+  before fetching it. A GGUF catalog entry pins its own `repository`/
+  `revision` to a verified quantization release and pins each
+  tokenizer/template `ModelFile`'s `repository`/`revision` to the matching
+  base-model revision (the same commit already pinned for that model's
+  Transformers entry, where applicable). Every file, regardless of source,
+  is still sha256/size-verified before being accepted, exactly as today.
+  Existing catalog entries — the legacy Transformers entries in
+  `catalog_data.py`, and any future GGUF entry with no reason to split
+  sources — are unaffected: leaving a `ModelFile`'s `repository`/`revision`
+  unset is a single-source entry, identical to today's behavior. This is
+  the multi-source installer design the plan originally deferred ("any
+  multi-source installer design would instead require an explicit plan
+  revision") and is now in scope for Block 2 — still with no hidden
+  download, since every source is declared per-file in the catalog module
+  itself, not inferred or fetched from an unpinned location at load time.
 - **Keep a lightweight, torch-free tokenizer purely for chat-template
   rendering, at least initially.** Rather than trusting llama.cpp's own
   GGUF-embedded chat-template engine (and whatever mechanism it offers for
@@ -386,6 +435,21 @@ repeated-control-token generation.
 Close these out live in Block 6, or earlier if real weights become
 available sooner.
 
+**Partially closed during Block 2 (2026-09-21):** real weights became
+available sooner, per the note above. Against the real catalog GGUF files
+(Block 2's `unsloth/Qwen3-0.6B-GGUF` and `ibm-granite/granite-3.3-2b-instruct-GGUF`,
+both Q4_K_M), `LlamaCppExtractor.generate()` produced clean completions for
+both models with no leaked `<think>` block and no `finish_reason == "length"`
+diagnostic - i.e. each model's own EOS token did stop generation correctly
+in practice, for the prompts tried. `inference/extractor.py:extract_invoice()`
+against a real fixture also completed cleanly for Qwen3. Still open: this
+was only exercised at `n_ctx=4096` (Qwen, against real extraction prompts)
+and `n_ctx=2048` (Granite, against a short test prompt only, not a real
+extraction prompt) - the chosen `n_ctx` is still not a measured-for-Granite's-
+real-prompts figure, and the empty-completion diagnostic's raw-text gap
+(previous paragraph) is unrelated to real weights and remains open
+regardless.
+
 ## Block 2: GGUF catalog entries for Granite-3.3-2B-Instruct and Qwen3-0.6B
 
 - Identify a real GGUF release for each of the two shipped models,
@@ -396,19 +460,29 @@ available sooner.
   a revision"). Do not reuse a checksum or revision from anywhere in this
   plan document as if verified; none are.
 - Each catalog entry must list a complete offline bundle: the selected GGUF
-  file (or all required shards), tokenizer files, tokenizer configuration,
-  chat-template files, and any model configuration required by AutoTokenizer.
-  Pin and verify the tokenizer/template source revision against the base
-  model used for the conversion; do not assume an unrelated repository's
-  current template matches. Include sizes and checksums for every asset.
-- Keep the existing single-repository installer contract. Prefer a verified
-  GGUF repository that already includes matching tokenizer/template assets.
-  If none exists, prepare an app-controlled Hugging Face bundle containing
-  the verified GGUF and the matching assets, retaining licenses and source
-  provenance, and pin that bundle's immutable revision. Publication/access
-  must be resolved before the catalog entry is accepted. Do not introduce
-  hidden secondary downloads at model-load time; any multi-source installer
-  design would instead require an explicit plan revision.
+  file (or all required shards, from the pinned quantization repository),
+  plus tokenizer files, tokenizer configuration, chat-template files, and
+  any model configuration required by AutoTokenizer (from the pinned
+  base-model repository, via each such file's own `repository`/`revision`
+  override — see the revised product decision above). Pin and verify the
+  tokenizer/template source revision against the base model actually used
+  for the GGUF conversion; do not assume an unrelated repository's current
+  template matches. Include sizes and checksums for every asset, regardless
+  of which repository it comes from.
+- Extend `models/catalog.py`'s `ModelFile` with optional `repository`/
+  `revision` fields (defaulting to `None`, meaning "use the entry's own
+  `repository`/`revision`"), and update `models/installer.py` to resolve
+  each file's effective repository/revision independently before calling
+  `fetch()` — per the revised product decision above. `install()`,
+  `is_installed()`, and `_resolve_file_path()` are otherwise unchanged:
+  checksum verification, file-granularity resumability, and the atomic
+  marker write already operate per file. Pin each catalog entry's own
+  `repository`/`revision` to a verified GGUF quantization release, and pin
+  each tokenizer/chat-template `ModelFile`'s `repository`/`revision` to the
+  matching base-model revision. Do not introduce any download whose source
+  isn't a `repository`/`revision` pinned directly in the catalog module
+  itself — a per-file override is still a fully declared, verified source,
+  not a hidden or inferred one.
 - Add the GGUF entries in a focused app catalog module and switch only the
   application consumers in `api/models_routes.py` and `api/analyses_routes.py`
   to that catalog. Preserve `models/catalog_data.py` and `SHORTLISTED_CATALOG`
@@ -431,14 +505,82 @@ available sooner.
 Checks: add app GGUF catalog coverage following the existing
 `backend/tests/models/test_catalog_data.py` shape/consistency patterns
 (file list non-empty, sizes match `total_size_bytes`, etc.), preserving the
-legacy catalog tests. Assert that each bundle declares its required tokenizer/template
-assets as well as its GGUF files. No live download in CI.
+legacy catalog tests. Assert that each bundle declares its required
+tokenizer/template assets as well as its GGUF files, and that its
+tokenizer/template files pin a `repository`/`revision` distinct from (and
+verified against) the GGUF's own. Extend `backend/tests/models/test_installer.py`
+for the new per-file source resolution: a file with no override uses the
+entry's own `repository`/`revision` (today's existing single-source tests
+must keep passing unmodified), a file with an override is fetched from its
+own `repository`/`revision` instead, and checksum verification/resumability
+behave identically regardless of source. No live download in CI.
 
-Acceptance: both catalog entries install cleanly through the existing,
-unmodified `models/installer.py` path (download, checksum verification,
-resume, marker write) against their real Hugging Face repos. From a clean
-Hugging Face cache, install each bundle, disable network access, and confirm
-tokenizer loading, exact template rendering, and real model generation.
+Acceptance: both catalog entries install cleanly through the installer's
+updated (still resumable, sha256-verified, atomically-marked) path against
+their real, separately-pinned GGUF and tokenizer/template Hugging Face
+repos. From a clean Hugging Face cache, install each bundle, disable
+network access, and confirm tokenizer loading, exact template rendering,
+and real model generation.
+
+**Implemented and live-verified (2026-09-21):** `models/catalog.py` and
+`models/installer.py` changed per the revised product decision above
+(`ModelFile.repository`/`revision` override, `installer._effective_source()`).
+The new app catalog lives in `models/gguf_catalog.py`
+(`GRANITE_3_3_2B_INSTRUCT_GGUF`, `QWEN3_0_6B_GGUF`, exported together as
+`SHORTLISTED_CATALOG` - same exported name as `catalog_data.py`'s, so
+`api/models_routes.py`/`api/analyses_routes.py` needed only a one-line
+import-path change and every existing test that monkeypatches
+`SHORTLISTED_CATALOG` on those route modules kept working unmodified).
+Chosen quantization: Q4_K_M for both models (the lower end of the
+Q4_K_M/Q5_K_M range this block left open). Sources, checked against the
+live Hugging Face API for every reputable GGUF release of both models (see
+the revised product decision's list) and picked for provenance:
+- **Granite 3.3 2B Instruct:** `ibm-granite/granite-3.3-2b-instruct-GGUF`
+  (IBM's own first-party GGUF conversion of their own model, tagged
+  `license:apache-2.0`, `base_model:ibm-granite/granite-3.3-2b-instruct`) -
+  preferred over any third-party quantizer since it's published by the same
+  org as the base model.
+- **Qwen3 0.6B:** Qwen's own official GGUF repo ships only a single Q8_0
+  quant, outside the target range, so `unsloth/Qwen3-0.6B-GGUF` is used
+  instead (Unsloth AI, a Hugging Face-verified organization widely used for
+  GGUF quantization).
+- Both entries' tokenizer/template files are pinned to the exact same
+  base-model repository/revision already verified in `catalog_data.py`
+  (`ibm-granite/granite-3.3-2b-instruct` @ `707f574c...`, `Qwen/Qwen3-0.6B`
+  @ `c1899de2...`) - confirmed by downloading each file at that pinned
+  revision and re-hashing it locally, which reproduced `catalog_data.py`'s
+  own already-pinned sha256/size values exactly. The minimal file set
+  `transformers.AutoTokenizer.from_pretrained()` actually needs was
+  determined empirically (not assumed): `tokenizer.json`,
+  `tokenizer_config.json`, `merges.txt`, `vocab.json` for Qwen; the same
+  four plus `special_tokens_map.json` and `added_tokens.json` for Granite -
+  neither model's `config.json`/`generation_config.json` is required for
+  tokenizer-only loading, so neither is in the GGUF catalog entries (unlike
+  the legacy Transformers entries, which need them to load model weights).
+- Every GGUF file's declared sha256 was independently verified by
+  downloading the real file and re-hashing it locally (not merely trusting
+  the Hugging Face API's own reported LFS sha256) - both matched exactly.
+- Went beyond this block's own "no live download in CI" Checks and this
+  Acceptance's minimum: ran the real, unmodified `models/installer.install()`
+  against both live catalog entries end to end (not a mocked `fetch`),
+  confirmed `is_installed()` afterward, then loaded each through the real
+  (unmodified) `LlamaCppExtractor.load_installed()` and called `generate()`
+  - both produced clean completions with no leaked `<think>` block,
+  confirming Qwen3's `enable_thinking=False` suppression live (closing out
+  one of Block 1's items deferred for lack of real weights). Also ran the
+  full, unmodified `inference/extractor.py:extract_invoice()` against
+  `fixtures/selectable_text_en.pdf` through the real Qwen3 GGUF end to end,
+  producing valid, parseable extraction JSON. `local_files_only=True` and a
+  local GGUF file path make the load path structurally incapable of a
+  network call regardless (also covered by Block 1's own
+  `test_load_installed_resolves_install_dir_and_forces_local_files_only`),
+  so this wasn't re-proven by physically cutting network access.
+- Not covered by this live run, still open for Block 5/6: GPU offload
+  (this sandbox is Linux/CPU-only; Metal/CUDA offload is unverified),
+  packaging/PyInstaller bundling, and the app's own UI/API flow (this was a
+  direct Python-level call, not through `AnalysisCoordinator`/the FastAPI
+  app - that full-stack path is Block 3's own already-passing unit tests
+  plus Block 6's live app validation).
 
 ## Block 3: Runtime and lifecycle integration
 
@@ -484,6 +626,35 @@ Acceptance: a real analysis job loads a GGUF model through the full
 Block 1's standalone script), and the existing idle-timeout/explicit-unload
 lifecycle from plan 10 continues to work unmodified against the new
 extractor type.
+
+**Implemented (mocked tests only — the live-analysis-job half of Acceptance
+above is deferred to Block 6, same as Block 1, since it needs a real GGUF
+model):** `select_device()` no longer returns a torch device string; it
+returns `"cpu"` or `"gpu"` (a GPU-offload intent, not a specific backend —
+llama.cpp exposes one build-wide offload flag rather than separate
+CUDA/MPS/ROCm availability, confirmed via `llama_cpp.llama_supports_gpu_offload()`),
+confirmed against the installed binding via an injectable
+`supports_gpu_offload_fn` parameter (mirroring `memory_status.py`'s existing
+injectable-provider pattern) rather than a hardcoded torch check. This
+required no change to `LlamaCppExtractor.load_installed()`'s own `device`
+parameter or its `n_gpu_layers = 0 if device == "cpu" else -1` check from
+Block 1 — any non-`"cpu"` string was already treated as full offload.
+`_unload_current()` calls `LlamaCppExtractor.close()` (added in Block 1)
+directly instead of `del` + `gc.collect()` + a torch cache-clear call —
+confirmed via the installed `llama-cpp-python` source that `close()`
+deterministically closes an `ExitStack` of the model/context/batch handles
+(freeing native/mmap resources immediately), rather than relying on `__del__`
+via Python GC, so no `gc.collect()` equivalent is needed. The app pipeline's
+provider literal is now `"llama.cpp"` (`analysis/pipeline.py:105,162,329`);
+`test_pipeline.py`'s app-specific assertion was updated to match, while
+`test_models.py`'s generic metrics tests keep using `"transformers"` as
+arbitrary valid data, per this block's own instructions. All call sites
+that resolved the default loader via `TransformersExtractor.load_installed`
+(`ModelRuntime.get_or_load()`, and every test that monkeypatched it —
+`test_runtime.py`, `test_analysis_coordinator.py`, `test_analyses.py`,
+`test_memory.py`) now reference `LlamaCppExtractor.load_installed` instead;
+each test file's fake extractor gained a no-op `close()` method since
+`_unload_current()` now calls it on every switch/unload.
 
 ## Block 4: Memory status for the new runtime
 
@@ -569,6 +740,44 @@ stack). No new automated packaging test is expected — this block is
 primarily a real build-and-run verification on both platforms, not unit-
 testable in isolation.
 
+**In progress (2026-09-21):** found and fixed live, while the user was
+testing Block 2/3 on their Mac (`cargo tauri dev` against a packaged
+worker) and hit `Shared library with base name 'llama' not found` at
+model-load time. Reproduced in the isolated Linux mirror
+(`scripts/linux_workspace.sh . scripts/build_worker_sidecar.sh`, safe -
+doesn't touch the Mac's staged worker) and confirmed the root cause via a
+real build's `warn-*.txt`: llama-cpp-python's `libllama`/`libggml*`
+libraries are loaded via `ctypes` from a `lib/` subdirectory of its own
+package, which PyInstaller's static import analysis has no way to
+discover. Fixed by adding `--collect-binaries llama_cpp` to the PyInstaller
+invocation (preserves the `llama_cpp/lib/` layout `load_shared_library()`
+expects, confirmed against the installed binding's source). Verified past
+just file presence: started the actual frozen onedir worker binary,
+listed models, submitted a real analysis job against the already-installed
+Qwen3 GGUF from Block 2's live verification, and got a completed extraction
+back through the full FastAPI app - the same code path the real Tauri app
+uses. This closes this bullet's Linux half; still needs macOS confirmation
+by the user (Metal-enabled llama-cpp-python wheel, real `cargo tauri dev`).
+
+Also found live, not yet fixed: `torch` is still fully bundled in the
+worker (confirmed present, e.g. `torch/lib/libtorch_cpu.so`) even though
+nothing in the app's actual runtime path needs it - proven by running the
+real extractor end to end with `torch` hidden from Python's import system
+entirely (`sys.meta_path`/`importlib.util.find_spec` patched to report it
+absent); extraction still completed. The likely mechanism: a hook
+force-collects `transformers.models.*` submodules for its Auto-class
+dynamic resolution, and many of those files do a top-level `import torch`
+that's never actually reached by this app's tokenizer-only path, but is
+still statically visible to PyInstaller. `--exclude-module torch` would
+almost certainly fix this and shrink the bundle substantially, but is not
+yet applied: `inference/memory_status.py`'s `_gpu_memory()` (Block 4, not
+done) still does a lazy `import torch` whenever `runtime_device != "cpu"` -
+on the user's Mac, `select_device()` will very likely return `"gpu"`
+(Metal-enabled builds are the default there), so hitting `/memory` while a
+model is loaded would crash with `ModuleNotFoundError` if torch were
+excluded now. Excluding torch from packaging should wait for Block 4's own
+torch removal from `memory_status.py`, not be done ahead of it.
+
 Acceptance: `scripts/build_worker_sidecar.sh` produces a worker that starts
 and loads a real GGUF model, staged and run through `cargo tauri dev` on
 the target Mac, including fixture analysis and unload. A Linux build
@@ -605,12 +814,17 @@ is resolved or explicitly accepted before the app migration is complete.
 ## Block 7: Security, sanity, and safety
 
 - Revision/provenance pinning: confirm the new GGUF catalog entries pin a
-  real, immutable revision the same way `TransformersExtractor.load()`
+  real, immutable revision — now potentially two per entry, since GGUF and
+  tokenizer/template assets may come from separate sources (see Block 2's
+  revised product decision) — the same way `TransformersExtractor.load()`
   currently enforces a full 40-hex-char commit hash
-  (`transformers_extractor.py:28,83-84`). Verify the app catalog pins the
-  complete GGUF/tokenizer bundle and the installer checks every declared
-  file. The app loader must consume only that installed bundle. The legacy
-  benchmark loader remains unchanged and is outside this review.
+  (`transformers_extractor.py:28,83-84`). Verify every declared file's
+  effective `repository`/`revision` (the entry-level default, or a per-file
+  override) is a real, pinned commit, not a floating ref, and that the
+  installer checksum-verifies every declared file regardless of which
+  source it came from. The app loader must consume only that installed
+  bundle. The legacy benchmark loader remains unchanged and is outside this
+  review.
 - `trust_remote_code=False` (`transformers_extractor.py:40,43`) has no
   direct llama.cpp equivalent since GGUF loading doesn't execute
   repository-supplied Python — confirm and document that this specific
@@ -680,3 +894,9 @@ Do not run or modify benchmarks as part of this plan.
 - invoice02.pdf > granite-3.3-2b-instruct · 22.3 s > qwen3-0.6b · 6.8 s 
 - invoice04.pdf > granite-3.3-2b-instruct · 14.8 s > qwen3-0.6b · 4.4 s 
 - invoice05.pdf > granite-3.3-2b-instruct · 18.9 s > qwen3-0.6b · 6.0 s
+
+## Inference Time with new runtime incl. "Shorten Names"
+
+- invoice02.pdf > granite-3.3-2b-instruct · 10.8 s
+- invoice04.pdf > granite-3.3-2b-instruct · 6.0 s
+- invoice05.pdf > granite-3.3-2b-instruct · 9.4 s

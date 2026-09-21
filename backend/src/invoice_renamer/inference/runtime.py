@@ -4,7 +4,7 @@ same model don't reload multi-GB weights per request.
 
 from __future__ import annotations
 
-import gc
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
@@ -13,7 +13,7 @@ from invoice_renamer.models.capabilities import AccelerationBackend, SystemCapab
 from invoice_renamer.models.catalog import ModelCatalogEntry
 
 if TYPE_CHECKING:
-    from invoice_renamer.inference.transformers_extractor import TransformersExtractor
+    from invoice_renamer.inference.llamacpp_extractor import LlamaCppExtractor
 
 
 @dataclass(frozen=True)
@@ -28,39 +28,39 @@ class RuntimeSnapshot:
     loading_entry_id: str | None
 
 
-_DEVICE_BY_BACKEND = {
-    AccelerationBackend.MPS: "mps",
-    AccelerationBackend.CUDA: "cuda",
-    # ROCm-enabled PyTorch builds expose AMD GPUs through the same torch.cuda
-    # device namespace, so "cuda" is the correct device string here too.
-    AccelerationBackend.ROCM: "cuda",
-    AccelerationBackend.CPU: "cpu",
-}
+def _llama_cpp_supports_gpu_offload() -> bool:
+    import llama_cpp
+
+    return bool(llama_cpp.llama_supports_gpu_offload())
 
 
-def select_device(capabilities: SystemCapabilities) -> str:
-    """Maps detected capabilities to a torch device string, confirmed against
-    torch itself before it is used.
+def select_device(
+    capabilities: SystemCapabilities,
+    *,
+    supports_gpu_offload_fn: Callable[[], bool] | None = None,
+) -> str:
+    """Maps detected capabilities to a GPU-offload intent for llama.cpp
+    ("cpu" or "gpu"), confirmed against the installed binding before it is
+    used.
 
-    Capability detection is deliberately torch-free so listing models stays
-    cheap at startup, which means it can only infer an accelerator from the
-    host (an `nvidia-smi` on PATH, Apple Silicon). That says nothing about the
-    installed torch wheel: a CPU-only build on a CUDA host would otherwise be
-    handed "cuda" here and fail at load. This runs immediately before loading a
-    model, where torch is imported anyway, so asking it directly costs nothing
-    and downgrading to CPU is always safe.
+    Capability detection is deliberately binding-free so listing models stays
+    cheap at startup, which means it can only infer whether *some*
+    accelerator is present on the host (an `nvidia-smi` on PATH, Apple
+    Silicon). That says nothing about whether the installed llama.cpp wheel
+    was actually built with GPU support - a CPU-only build on a CUDA host
+    would otherwise be handed "gpu" here and silently run on CPU anyway (or
+    fail, depending on the build). This runs immediately before loading a
+    model, where llama_cpp is imported anyway, so asking it directly costs
+    nothing and downgrading to CPU is always safe. Unlike torch, llama.cpp
+    exposes one build-wide offload flag rather than separate CUDA/MPS/ROCm
+    availability checks - whichever accelerator the installed binding was
+    compiled against is the one a "gpu" result will actually use.
     """
-    device = _DEVICE_BY_BACKEND[capabilities.acceleration]
-    if device == "cpu":
-        return device
+    if capabilities.acceleration is AccelerationBackend.CPU:
+        return "cpu"
 
-    import torch
-
-    if device == "cuda" and torch.cuda.is_available():
-        return device
-    if device == "mps" and torch.backends.mps.is_available():
-        return device
-    return "cpu"
+    supports_gpu_offload_fn = supports_gpu_offload_fn or _llama_cpp_supports_gpu_offload
+    return "gpu" if supports_gpu_offload_fn() else "cpu"
 
 
 class LoadInstalledFn(Protocol):
@@ -73,7 +73,7 @@ class LoadInstalledFn(Protocol):
 
     def __call__(
         self, entry: ModelCatalogEntry, data_dir: Path, *, device: str
-    ) -> TransformersExtractor: ...
+    ) -> LlamaCppExtractor: ...
 
 
 class ModelRuntime:
@@ -86,12 +86,12 @@ class ModelRuntime:
 
     def __init__(self, *, load_installed: LoadInstalledFn | None = None) -> None:
         self._loaded: tuple[str, str | None] | None = None
-        self._extractor: TransformersExtractor | None = None
+        self._extractor: LlamaCppExtractor | None = None
         self._device: str | None = None
         self._loading = False
         self._loading_entry_id: str | None = None
         # Lazily resolved (not a bound default argument) so tests can
-        # monkeypatch TransformersExtractor.load_installed after construction,
+        # monkeypatch LlamaCppExtractor.load_installed after construction,
         # same pattern as installer.py's FetchFn.
         self._load_installed = load_installed
 
@@ -111,7 +111,7 @@ class ModelRuntime:
 
     def get_or_load(
         self, entry: ModelCatalogEntry, data_dir: Path, device: str
-    ) -> TransformersExtractor:
+    ) -> LlamaCppExtractor:
         key = (entry.id, entry.revision)
         if self._loaded == key and self._extractor is not None:
             return self._extractor
@@ -119,9 +119,9 @@ class ModelRuntime:
         load_installed = self._load_installed
         if load_installed is None:
             # Import the inference stack only when an analysis first needs a model.
-            from invoice_renamer.inference.transformers_extractor import TransformersExtractor
+            from invoice_renamer.inference.llamacpp_extractor import LlamaCppExtractor
 
-            load_installed = TransformersExtractor.load_installed
+            load_installed = LlamaCppExtractor.load_installed
         self._loading, self._loading_entry_id = True, entry.id
         try:
             self._extractor = load_installed(entry, data_dir, device=device)
@@ -141,14 +141,10 @@ class ModelRuntime:
     def _unload_current(self) -> None:
         if self._extractor is None:
             return
-        import torch
-
-        del self._extractor
+        extractor = self._extractor
+        # Detach before closing so a cleanup failure cannot leave a partially
+        # closed model cached or trigger repeated idle-unload attempts.
         self._extractor = None
         self._loaded = None
         self._device = None
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        if torch.backends.mps.is_available():
-            torch.mps.empty_cache()
+        extractor.close()

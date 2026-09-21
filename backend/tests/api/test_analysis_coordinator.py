@@ -14,7 +14,7 @@ import pytest
 from invoice_renamer.api import analyses_routes
 from invoice_renamer.api.analyses_routes import AnalysisCoordinator, AnalysisJob, DocumentFormat
 from invoice_renamer.documents.format import detect_document_format
-from invoice_renamer.inference.transformers_extractor import TransformersExtractor
+from invoice_renamer.inference.llamacpp_extractor import LlamaCppExtractor
 from invoice_renamer.models.catalog import MemoryTier, ModelCatalogEntry, ModelFile
 from invoice_renamer.models.installer import _marker_payload, install_dir_for
 
@@ -66,6 +66,9 @@ class _FakeExtractor:
             self._block.wait(timeout=5)
         return self._response
 
+    def close(self) -> None:
+        pass
+
 
 class _FakeClock:
     def __init__(self, start: float = 1_000.0) -> None:
@@ -103,7 +106,7 @@ def test_idle_timeout_unloads_after_the_deadline_elapses(
 ) -> None:
     monkeypatch.setattr(analyses_routes, "_IDLE_POLL_SECONDS", 0.02)
     monkeypatch.setattr(
-        TransformersExtractor, "load_installed", lambda e, d, *, device: _FakeExtractor()
+        LlamaCppExtractor, "load_installed", lambda e, d, *, device: _FakeExtractor()
     )
     entry = _entry()
     monkeypatch.setattr(analyses_routes, "SHORTLISTED_CATALOG", [entry])
@@ -124,7 +127,7 @@ def test_idle_timeout_does_not_fire_before_the_deadline(
 ) -> None:
     monkeypatch.setattr(analyses_routes, "_IDLE_POLL_SECONDS", 0.02)
     monkeypatch.setattr(
-        TransformersExtractor, "load_installed", lambda e, d, *, device: _FakeExtractor()
+        LlamaCppExtractor, "load_installed", lambda e, d, *, device: _FakeExtractor()
     )
     entry = _entry()
     monkeypatch.setattr(analyses_routes, "SHORTLISTED_CATALOG", [entry])
@@ -145,7 +148,7 @@ def test_idle_timeout_does_not_fire_while_a_job_is_queued_or_running(
     monkeypatch.setattr(analyses_routes, "_IDLE_POLL_SECONDS", 0.02)
     block = threading.Event()
     monkeypatch.setattr(
-        TransformersExtractor, "load_installed", lambda e, d, *, device: _FakeExtractor(block=block)
+        LlamaCppExtractor, "load_installed", lambda e, d, *, device: _FakeExtractor(block=block)
     )
     entry = _entry()
     monkeypatch.setattr(analyses_routes, "SHORTLISTED_CATALOG", [entry])
@@ -168,7 +171,7 @@ def test_request_unload_frees_the_model_when_idle(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setattr(
-        TransformersExtractor, "load_installed", lambda e, d, *, device: _FakeExtractor()
+        LlamaCppExtractor, "load_installed", lambda e, d, *, device: _FakeExtractor()
     )
     entry = _entry()
     monkeypatch.setattr(analyses_routes, "SHORTLISTED_CATALOG", [entry])
@@ -198,7 +201,7 @@ def test_request_unload_raises_409_while_a_job_is_running(
 
     block = threading.Event()
     monkeypatch.setattr(
-        TransformersExtractor, "load_installed", lambda e, d, *, device: _FakeExtractor(block=block)
+        LlamaCppExtractor, "load_installed", lambda e, d, *, device: _FakeExtractor(block=block)
     )
     entry = _entry()
     monkeypatch.setattr(analyses_routes, "SHORTLISTED_CATALOG", [entry])
@@ -223,7 +226,7 @@ def test_request_unload_raises_409_while_a_job_is_queued(
 
     block = threading.Event()
     monkeypatch.setattr(
-        TransformersExtractor, "load_installed", lambda e, d, *, device: _FakeExtractor(block=block)
+        LlamaCppExtractor, "load_installed", lambda e, d, *, device: _FakeExtractor(block=block)
     )
     entry = _entry()
     monkeypatch.setattr(analyses_routes, "SHORTLISTED_CATALOG", [entry])
@@ -252,7 +255,7 @@ def test_request_unload_surfaces_a_failure_as_500_and_keeps_the_worker_alive(
     from invoice_renamer.inference import runtime as runtime_module
 
     monkeypatch.setattr(
-        TransformersExtractor, "load_installed", lambda e, d, *, device: _FakeExtractor()
+        LlamaCppExtractor, "load_installed", lambda e, d, *, device: _FakeExtractor()
     )
     entry = _entry()
     monkeypatch.setattr(analyses_routes, "SHORTLISTED_CATALOG", [entry])
@@ -279,7 +282,7 @@ def test_concurrent_unload_requests_all_receive_a_response(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setattr(
-        TransformersExtractor, "load_installed", lambda e, d, *, device: _FakeExtractor()
+        LlamaCppExtractor, "load_installed", lambda e, d, *, device: _FakeExtractor()
     )
     entry = _entry()
     monkeypatch.setattr(analyses_routes, "SHORTLISTED_CATALOG", [entry])
@@ -308,7 +311,7 @@ def test_unload_and_job_admission_are_serialized(
 
     load_calls: list[str] = []
     monkeypatch.setattr(
-        TransformersExtractor,
+        LlamaCppExtractor,
         "load_installed",
         lambda e, d, *, device: load_calls.append(e.id) or _FakeExtractor(),
     )
@@ -376,7 +379,7 @@ def test_idle_unload_and_job_admission_are_serialized(
     load_calls: list[str] = []
     monkeypatch.setattr(analyses_routes, "_IDLE_POLL_SECONDS", 0.02)
     monkeypatch.setattr(
-        TransformersExtractor,
+        LlamaCppExtractor,
         "load_installed",
         lambda e, d, *, device: load_calls.append(e.id) or _FakeExtractor(),
     )

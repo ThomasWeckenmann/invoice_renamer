@@ -54,3 +54,37 @@ def test_total_size_bytes_sums_all_files() -> None:
     )
 
     assert entry.total_size_bytes == 350
+
+
+def test_file_repository_and_revision_default_to_unset() -> None:
+    file = ModelFile(path="model.bin", sha256="a" * 64, size_bytes=1)
+
+    assert file.repository is None
+    assert file.revision is None
+
+
+def test_file_accepts_a_repository_and_revision_override() -> None:
+    file = ModelFile(
+        path="tokenizer.json",
+        sha256="a" * 64,
+        size_bytes=1,
+        repository="base-model-org/base-model",
+        revision="f" * 40,
+    )
+
+    assert file.repository == "base-model-org/base-model"
+    assert file.revision == "f" * 40
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"repository": "base-model-org/base-model"},
+        {"revision": "f" * 40},
+    ],
+)
+def test_file_rejects_a_repository_or_revision_set_without_the_other(
+    overrides: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError):
+        ModelFile(path="tokenizer.json", sha256="a" * 64, size_bytes=1, **overrides)  # type: ignore[arg-type]

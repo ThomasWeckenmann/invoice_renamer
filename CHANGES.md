@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 1.0.0 (2026-09-21, claude sonnet-5)
+
+- Switch the app's local model runtime from Transformers/PyTorch to llama.cpp
+
+  Pin GGUF and tokenizer/template files to separate verified Hugging Face sources.
+  Run Granite 3.3 2B Instruct and Qwen3 0.6B as Q4_K_M GGUF quants;
+  retain the legacy Transformers benchmark path. Clear cached model state before
+  cleanup so unload failures cannot reuse closed models or cause idle retry loops.
+
 ## Version 0.39.0 (2026-09-21, claude sonnet-5, nemotron 3 ultra)
 
 - Add a llama.cpp-backed extractor for the planned Transformers-to-llama.cpp runtime swap

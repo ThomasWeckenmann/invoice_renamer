@@ -8,8 +8,8 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
 from invoice_renamer.models.capabilities import SystemCapabilities
 from invoice_renamer.models.catalog import ModelCatalogEntry
-from invoice_renamer.models.catalog_data import SHORTLISTED_CATALOG
 from invoice_renamer.models.detection import detect_capabilities
+from invoice_renamer.models.gguf_catalog import SHORTLISTED_CATALOG
 from invoice_renamer.models.installer import (
     InstallCancelled,
     install,

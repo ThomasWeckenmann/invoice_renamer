@@ -66,7 +66,17 @@ echo "Building $sidecar_name for $target_triple with PyInstaller ($mode)..."
     --workpath "$build_root/build" \
     --specpath "$build_root" \
     --add-data "$backend_dir/THIRD-PARTY-LICENSES:." \
+    --collect-binaries llama_cpp \
     packaging/worker_entrypoint.py
+  # --collect-binaries llama_cpp: llama-cpp-python ships its compiled
+  # libllama/libggml* shared libraries as plain package data under
+  # llama_cpp/lib/, loaded via ctypes at runtime - PyInstaller's static
+  # import analysis has no way to discover a ctypes-loaded library on its
+  # own, so without this flag the worker fails at model-load time with
+  # "Shared library with base name 'llama' not found". This preserves the
+  # llama_cpp/lib/ subdirectory layout load_shared_library() expects
+  # relative to the package (confirmed against the installed binding's
+  # source and a real onedir build in the isolated Linux mirror).
   # --add-data's source must be absolute: a relative one resolves against
   # --specpath, not this subshell's cwd - confirmed by a throwaway build,
   # since PyInstaller's own docs don't spell this out. Its destination "."

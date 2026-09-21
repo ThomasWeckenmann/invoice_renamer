@@ -6,10 +6,9 @@ import weakref
 from pathlib import Path
 
 import pytest
-import torch
 
+from invoice_renamer.inference.llamacpp_extractor import LlamaCppExtractor
 from invoice_renamer.inference.runtime import ModelRuntime, select_device
-from invoice_renamer.inference.transformers_extractor import TransformersExtractor
 from invoice_renamer.models.capabilities import AccelerationBackend, SystemCapabilities
 from invoice_renamer.models.catalog import MemoryTier, ModelCatalogEntry, ModelFile
 
@@ -27,8 +26,11 @@ def _entry(model_id: str = "model-a", revision: str = "a" * 40) -> ModelCatalogE
 
 
 class _FakeExtractor:
-    """Stands in for TransformersExtractor - a distinct object per load so a
+    """Stands in for LlamaCppExtractor - a distinct object per load so a
     weakref can prove whether the earlier instance was actually released."""
+
+    def close(self) -> None:
+        pass
 
 
 def test_get_or_load_caches_on_repeated_calls_with_the_same_key(tmp_path: Path) -> None:
@@ -220,7 +222,7 @@ def test_unload_is_a_no_op_when_nothing_is_loaded(tmp_path: Path) -> None:
     assert runtime.loaded_entry_id() is None
 
 
-def test_default_loader_resolves_to_transformers_extractor_load_installed(
+def test_default_loader_resolves_to_llamacpp_extractor_load_installed(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     captured: dict[str, object] = {}
@@ -233,7 +235,7 @@ def test_default_loader_resolves_to_transformers_extractor_load_installed(
         captured["device"] = device
         return _FakeExtractor()
 
-    monkeypatch.setattr(TransformersExtractor, "load_installed", fake_load_installed)
+    monkeypatch.setattr(LlamaCppExtractor, "load_installed", fake_load_installed)
 
     runtime = ModelRuntime()
     entry = _entry()
@@ -247,53 +249,49 @@ def _capabilities(backend: AccelerationBackend) -> SystemCapabilities:
     return SystemCapabilities(acceleration=backend, memory_gb=16, free_disk_gb=100)
 
 
-def _set_torch_availability(monkeypatch: pytest.MonkeyPatch, *, cuda: bool, mps: bool) -> None:
-    monkeypatch.setattr(torch.cuda, "is_available", lambda: cuda)
-    monkeypatch.setattr(torch.backends.mps, "is_available", lambda: mps)
-
-
 @pytest.mark.parametrize(
-    "backend,expected_device",
-    [
-        (AccelerationBackend.MPS, "mps"),
-        (AccelerationBackend.CUDA, "cuda"),
-        (AccelerationBackend.ROCM, "cuda"),
-        (AccelerationBackend.CPU, "cpu"),
-    ],
+    "backend",
+    [AccelerationBackend.MPS, AccelerationBackend.CUDA, AccelerationBackend.ROCM],
 )
-def test_select_device_maps_every_backend_torch_supports(
-    backend: AccelerationBackend, expected_device: str, monkeypatch: pytest.MonkeyPatch
+def test_select_device_returns_gpu_when_the_installed_binding_supports_offload(
+    backend: AccelerationBackend,
 ) -> None:
-    _set_torch_availability(monkeypatch, cuda=True, mps=True)
-
-    assert select_device(_capabilities(backend)) == expected_device
+    assert select_device(_capabilities(backend), supports_gpu_offload_fn=lambda: True) == "gpu"
 
 
 @pytest.mark.parametrize(
     "backend",
     [AccelerationBackend.MPS, AccelerationBackend.CUDA, AccelerationBackend.ROCM],
 )
-def test_select_device_downgrades_to_cpu_when_torch_cannot_use_the_accelerator(
-    backend: AccelerationBackend, monkeypatch: pytest.MonkeyPatch
+def test_select_device_downgrades_to_cpu_when_the_binding_reports_no_gpu_offload_support(
+    backend: AccelerationBackend,
 ) -> None:
-    """Detection only sees the host's hardware, so a CPU-only torch wheel on a
-    machine with an accelerator present must not be handed a device it would
-    then fail to load onto."""
-    _set_torch_availability(monkeypatch, cuda=False, mps=False)
-
-    assert select_device(_capabilities(backend)) == "cpu"
+    """Detection only sees the host's hardware, so an installed llama.cpp
+    build with no GPU support compiled in, on a machine with an accelerator
+    present, must not be handed a device it would then fail to load onto."""
+    assert select_device(_capabilities(backend), supports_gpu_offload_fn=lambda: False) == "cpu"
 
 
-def test_select_device_does_not_consult_torch_for_a_cpu_host(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_select_device_does_not_consult_the_binding_for_a_cpu_host() -> None:
     """A CPU capability needs no confirmation - checking anyway would import
-    torch on hosts that never load a model."""
+    llama_cpp on hosts that never load a model."""
 
     def fail() -> bool:
-        raise AssertionError("torch availability must not be probed for a CPU host")
+        raise AssertionError("GPU offload support must not be probed for a CPU host")
 
-    monkeypatch.setattr(torch.cuda, "is_available", fail)
-    monkeypatch.setattr(torch.backends.mps, "is_available", fail)
+    assert (
+        select_device(_capabilities(AccelerationBackend.CPU), supports_gpu_offload_fn=fail) == "cpu"
+    )
 
-    assert select_device(_capabilities(AccelerationBackend.CPU)) == "cpu"
+
+def test_select_device_defaults_to_the_real_llama_cpp_binding_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without an injected fn, select_device must actually consult the
+    installed llama_cpp binding rather than silently defaulting to one
+    fixed answer."""
+    from invoice_renamer.inference import runtime as runtime_module
+
+    monkeypatch.setattr(runtime_module, "_llama_cpp_supports_gpu_offload", lambda: True)
+
+    assert select_device(_capabilities(AccelerationBackend.CUDA)) == "gpu"

@@ -6,7 +6,7 @@ benchmarking, not by this schema; nothing here is a shipped model list.
 
 from enum import Enum
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class MemoryTier(str, Enum):
@@ -21,6 +21,13 @@ class ModelFile(BaseModel):
     path: str
     sha256: str
     size_bytes: int
+    # Overrides the entry's own repository/revision for this one file, e.g. a
+    # tokenizer asset pinned to the base model's repository while the entry's
+    # own repository/revision points at a separate GGUF quantization release.
+    # Left unset, a file uses the entry's repository/revision - today's
+    # single-source behavior is unchanged.
+    repository: str | None = None
+    revision: str | None = None
 
     @field_validator("size_bytes")
     @classmethod
@@ -28,6 +35,12 @@ class ModelFile(BaseModel):
         if value < 0:
             raise ValueError("size_bytes must not be negative")
         return value
+
+    @model_validator(mode="after")
+    def _validate_repository_and_revision_are_both_set_or_neither(self) -> "ModelFile":
+        if (self.repository is None) != (self.revision is None):
+            raise ValueError("repository and revision must both be set, or both left unset")
+        return self
 
 
 class ModelCatalogEntry(BaseModel):

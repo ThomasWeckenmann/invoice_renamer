@@ -128,6 +128,14 @@ def _default_fetch(repository: str, revision: str, filename: str, dest_dir: Path
     )
 
 
+def _effective_source(entry: ModelCatalogEntry, file: ModelFile) -> tuple[str, str]:
+    """A file's own repository/revision override, or the entry's own when
+    unset - see ModelFile's docstring."""
+    if file.repository is not None and file.revision is not None:
+        return file.repository, file.revision
+    return entry.repository, entry.revision
+
+
 def install(
     entry: ModelCatalogEntry,
     data_dir: Path,
@@ -155,7 +163,8 @@ def install(
                 marker_invalidated = True
             if dest.exists():
                 dest.unlink()
-            fetch(entry.repository, entry.revision, file.path, install_dir)
+            file_repository, file_revision = _effective_source(entry, file)
+            fetch(file_repository, file_revision, file.path, install_dir)
             if not _file_is_already_verified(dest, file):
                 dest.unlink(missing_ok=True)
                 raise ChecksumMismatch(entry.id, file.path)

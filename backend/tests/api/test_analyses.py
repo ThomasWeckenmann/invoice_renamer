@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from invoice_renamer.api import analyses_routes
 from invoice_renamer.api.app import create_app
 from invoice_renamer.documents import image_open
-from invoice_renamer.inference.transformers_extractor import TransformersExtractor
+from invoice_renamer.inference.llamacpp_extractor import LlamaCppExtractor
 from invoice_renamer.models.catalog import MemoryTier, ModelCatalogEntry, ModelFile
 from invoice_renamer.models.installer import _marker_payload, install_dir_for
 
@@ -112,13 +112,14 @@ def _poll_until(
 
 
 class _FakeExtractor:
-    """Stands in for TransformersExtractor: implements only LanguageModel's
-    generate(), scripted to return a fixed response and optionally block on a
-    threading.Event first, to control worker-thread timing from a test.
-    `calls`, when given, records one entry per generate() call - the precise
-    signal for whether a cancelled job's pipeline actually ran, since
-    ModelRuntime's cache means the *loader* is only called once regardless of
-    how many jobs share a model."""
+    """Stands in for LlamaCppExtractor: implements LanguageModel's generate()
+    plus close() (ModelRuntime calls close() on unload/switch), scripted to
+    return a fixed response and optionally block on a threading.Event first,
+    to control worker-thread timing from a test. `calls`, when given, records
+    one entry per generate() call - the precise signal for whether a
+    cancelled job's pipeline actually ran, since ModelRuntime's cache means
+    the *loader* is only called once regardless of how many jobs share a
+    model."""
 
     def __init__(
         self,
@@ -138,6 +139,9 @@ class _FakeExtractor:
             self._block.wait(timeout=5)
         return self._response
 
+    def close(self) -> None:
+        pass
+
 
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> TestClient:
@@ -153,7 +157,7 @@ def test_happy_path_end_to_end(
     entry = _entry(_MODEL_A)
     _install(entry, tmp_path)
     monkeypatch.setattr(
-        TransformersExtractor,
+        LlamaCppExtractor,
         "load_installed",
         lambda entry, data_dir, *, device: _FakeExtractor(_VALID_MODEL_RESPONSE),
     )
@@ -197,7 +201,7 @@ def test_valid_jpeg_upload_is_accepted_and_completes(
     entry = _entry(_MODEL_A)
     _install(entry, tmp_path)
     monkeypatch.setattr(
-        TransformersExtractor,
+        LlamaCppExtractor,
         "load_installed",
         lambda entry, data_dir, *, device: _FakeExtractor(_VALID_MODEL_RESPONSE),
     )
@@ -232,7 +236,7 @@ def test_a_pdf_job_and_a_jpeg_job_complete_correctly_through_the_same_coordinato
     entry = _entry(_MODEL_A)
     _install(entry, tmp_path)
     monkeypatch.setattr(
-        TransformersExtractor,
+        LlamaCppExtractor,
         "load_installed",
         lambda entry, data_dir, *, device: _FakeExtractor(_VALID_MODEL_RESPONSE),
     )
@@ -264,7 +268,7 @@ def test_corrupt_jpeg_upload_is_422_and_never_creates_a_job(
     _install(entry, tmp_path)
     calls: list[object] = []
     monkeypatch.setattr(
-        TransformersExtractor,
+        LlamaCppExtractor,
         "load_installed",
         lambda entry, data_dir, *, device: calls.append(1) or _FakeExtractor(_VALID_MODEL_RESPONSE),
     )
@@ -287,7 +291,7 @@ def test_oversized_jpeg_dimensions_is_422_and_never_creates_a_job(
     _install(entry, tmp_path)
     calls: list[object] = []
     monkeypatch.setattr(
-        TransformersExtractor,
+        LlamaCppExtractor,
         "load_installed",
         lambda entry, data_dir, *, device: calls.append(1) or _FakeExtractor(_VALID_MODEL_RESPONSE),
     )
@@ -311,7 +315,7 @@ def test_non_pdf_upload_is_422_and_never_creates_a_job(
     _install(entry, tmp_path)
     calls: list[object] = []
     monkeypatch.setattr(
-        TransformersExtractor,
+        LlamaCppExtractor,
         "load_installed",
         lambda entry, data_dir, *, device: calls.append(1) or _FakeExtractor(_VALID_MODEL_RESPONSE),
     )
@@ -333,7 +337,7 @@ def test_corrupt_pdf_shaped_upload_ends_the_job_failed(
     entry = _entry(_MODEL_A)
     _install(entry, tmp_path)
     monkeypatch.setattr(
-        TransformersExtractor,
+        LlamaCppExtractor,
         "load_installed",
         lambda entry, data_dir, *, device: _FakeExtractor(_VALID_MODEL_RESPONSE),
     )
@@ -354,7 +358,7 @@ def test_queued_jobs_run_in_submission_order(
     _install(entry, tmp_path)
     block = threading.Event()
     monkeypatch.setattr(
-        TransformersExtractor,
+        LlamaCppExtractor,
         "load_installed",
         lambda entry, data_dir, *, device: _FakeExtractor(_VALID_MODEL_RESPONSE, block=block),
     )
@@ -396,7 +400,7 @@ def test_cancel_a_queued_job_marks_it_cancelled_without_ever_running_it(
     def fake_loader(entry: ModelCatalogEntry, data_dir: Path, *, device: str) -> _FakeExtractor:
         return _FakeExtractor(_VALID_MODEL_RESPONSE, block=block, calls=generate_calls)
 
-    monkeypatch.setattr(TransformersExtractor, "load_installed", fake_loader)
+    monkeypatch.setattr(LlamaCppExtractor, "load_installed", fake_loader)
 
     first = _submit(client, _MODEL_A)  # occupies the worker, blocked
     second = _submit(client, _MODEL_A)  # stays queued
@@ -429,7 +433,7 @@ def test_cancel_a_running_job_settles_cancelled_not_completed(
     _install(entry, tmp_path)
     block = threading.Event()
     monkeypatch.setattr(
-        TransformersExtractor,
+        LlamaCppExtractor,
         "load_installed",
         lambda entry, data_dir, *, device: _FakeExtractor(_VALID_MODEL_RESPONSE, block=block),
     )
@@ -471,7 +475,7 @@ def test_switching_models_frees_the_first_extractor_before_the_second_loads(
         assert state["ref"]() is None, "model A must be released before model B loads"  # type: ignore[operator]
         return _FakeExtractor(_VALID_MODEL_RESPONSE)
 
-    monkeypatch.setattr(TransformersExtractor, "load_installed", loader)
+    monkeypatch.setattr(LlamaCppExtractor, "load_installed", loader)
 
     job_a = _submit(client, _MODEL_A)
     _poll_until(client, job_a["id"], terminal_statuses=("completed",))
@@ -489,7 +493,7 @@ def test_pending_bytes_cap_returns_429_until_jobs_drain(
     _install(entry, tmp_path)
     block = threading.Event()
     monkeypatch.setattr(
-        TransformersExtractor,
+        LlamaCppExtractor,
         "load_installed",
         lambda entry, data_dir, *, device: _FakeExtractor(_VALID_MODEL_RESPONSE, block=block),
     )
@@ -535,7 +539,7 @@ def test_pending_bytes_cap_is_race_free_under_concurrent_submissions(
     _install(entry, tmp_path)
     block = threading.Event()
     monkeypatch.setattr(
-        TransformersExtractor,
+        LlamaCppExtractor,
         "load_installed",
         lambda entry, data_dir, *, device: _FakeExtractor(_VALID_MODEL_RESPONSE, block=block),
     )
@@ -605,7 +609,7 @@ def test_terminal_job_drops_its_document_bytes(
     entry = _entry(_MODEL_A)
     _install(entry, tmp_path)
     monkeypatch.setattr(
-        TransformersExtractor,
+        LlamaCppExtractor,
         "load_installed",
         lambda entry, data_dir, *, device: _FakeExtractor(_VALID_MODEL_RESPONSE),
     )
@@ -637,7 +641,7 @@ def test_complete_xml_job_still_loads_the_model_once_to_shorten_fields(
     _install(entry, tmp_path)
     load_calls: list[str] = []
     monkeypatch.setattr(
-        TransformersExtractor,
+        LlamaCppExtractor,
         "load_installed",
         lambda entry, data_dir, *, device: (
             load_calls.append(entry.id) or _FakeExtractor(_VALID_MODEL_RESPONSE)
@@ -676,7 +680,7 @@ def test_shorten_fields_false_skips_the_shortening_pass_and_the_model_load(
     _install(entry, tmp_path)
     load_calls: list[str] = []
     monkeypatch.setattr(
-        TransformersExtractor,
+        LlamaCppExtractor,
         "load_installed",
         lambda entry, data_dir, *, device: (
             load_calls.append(entry.id) or _FakeExtractor(_VALID_MODEL_RESPONSE)
@@ -714,7 +718,7 @@ def test_partial_xml_job_merges_model_fallback_without_overwriting_xml_fields(
         }
     )
     monkeypatch.setattr(
-        TransformersExtractor,
+        LlamaCppExtractor,
         "load_installed",
         lambda entry, data_dir, *, device: _FakeExtractor(conflicting_response),
     )
@@ -749,7 +753,7 @@ def test_malformed_xml_job_falls_back_to_the_model_entirely(
     entry = _entry(_MODEL_A)
     _install(entry, tmp_path)
     monkeypatch.setattr(
-        TransformersExtractor,
+        LlamaCppExtractor,
         "load_installed",
         lambda entry, data_dir, *, device: _FakeExtractor(_VALID_MODEL_RESPONSE),
     )
@@ -773,7 +777,7 @@ def test_a_batch_can_mix_xml_only_and_model_based_jobs(
     _install(entry, tmp_path)
     load_calls: list[str] = []
     monkeypatch.setattr(
-        TransformersExtractor,
+        LlamaCppExtractor,
         "load_installed",
         lambda entry, data_dir, *, device: (
             load_calls.append(entry.id) or _FakeExtractor(_VALID_MODEL_RESPONSE)

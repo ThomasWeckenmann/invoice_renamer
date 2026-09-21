@@ -26,8 +26,8 @@ from invoice_renamer.inference.runtime import (
 from invoice_renamer.metrics.models import RunMetrics
 from invoice_renamer.models.capabilities import SystemCapabilities
 from invoice_renamer.models.catalog import ModelCatalogEntry
-from invoice_renamer.models.catalog_data import SHORTLISTED_CATALOG
 from invoice_renamer.models.detection import detect_capabilities
+from invoice_renamer.models.gguf_catalog import SHORTLISTED_CATALOG
 from invoice_renamer.models.installer import is_installed
 from invoice_renamer.naming.schema import FilenameProposal
 
@@ -370,10 +370,8 @@ class AnalysisCoordinator:
         try:
             self._runtime.unload()
         except Exception:
-            # ModelRuntime clears its residency state before the exception-
-            # prone cache-clearing calls, so loaded_entry_id() already
-            # reflects "unloaded" here - this can't repeat into a tight loop,
-            # it's just logged so a leaked GPU cache isn't silent.
+            # ModelRuntime clears its residency state before closing the
+            # extractor, so a cleanup failure cannot cause an idle retry loop.
             logger.exception("idle model unload failed")
 
 

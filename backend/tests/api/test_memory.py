@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 from invoice_renamer.api import analyses_routes
 from invoice_renamer.api.app import create_app
-from invoice_renamer.inference.transformers_extractor import TransformersExtractor
+from invoice_renamer.inference.llamacpp_extractor import LlamaCppExtractor
 from invoice_renamer.models.catalog import MemoryTier, ModelCatalogEntry, ModelFile
 from invoice_renamer.models.installer import _marker_payload, install_dir_for
 
@@ -67,6 +67,9 @@ class _FakeExtractor:
             self._block.wait(timeout=5)
         return self._response
 
+    def close(self) -> None:
+        pass
+
 
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> TestClient:
@@ -110,7 +113,7 @@ def test_reports_the_runtime_device_once_a_model_has_loaded(
     entry = _entry()
     _install(entry, tmp_path)
     monkeypatch.setattr(
-        TransformersExtractor,
+        LlamaCppExtractor,
         "load_installed",
         lambda entry, data_dir, *, device: _FakeExtractor(_VALID_MODEL_RESPONSE),
     )
@@ -147,7 +150,7 @@ def test_loading_is_true_only_while_a_load_is_in_flight(
         release.wait(timeout=5)
         return _FakeExtractor(_VALID_MODEL_RESPONSE)
 
-    monkeypatch.setattr(TransformersExtractor, "load_installed", slow_load_installed)
+    monkeypatch.setattr(LlamaCppExtractor, "load_installed", slow_load_installed)
 
     submitted = client.post(
         "/analyses",
@@ -188,7 +191,7 @@ def test_unload_route_frees_the_model_and_a_later_job_reloads_it(
     _install(entry, tmp_path)
     load_calls: list[str] = []
     monkeypatch.setattr(
-        TransformersExtractor,
+        LlamaCppExtractor,
         "load_installed",
         lambda entry, data_dir, *, device: (
             load_calls.append(entry.id) or _FakeExtractor(_VALID_MODEL_RESPONSE)
@@ -243,7 +246,7 @@ def test_unload_route_returns_409_while_a_job_is_running(
     _install(entry, tmp_path)
     block = threading.Event()
     monkeypatch.setattr(
-        TransformersExtractor,
+        LlamaCppExtractor,
         "load_installed",
         lambda entry, data_dir, *, device: _FakeExtractor(_VALID_MODEL_RESPONSE, block=block),
     )
@@ -286,7 +289,7 @@ def test_returns_promptly_while_the_worker_is_blocked_inside_inference(
     _install(entry, tmp_path)
     block = threading.Event()
     monkeypatch.setattr(
-        TransformersExtractor,
+        LlamaCppExtractor,
         "load_installed",
         lambda entry, data_dir, *, device: _FakeExtractor(_VALID_MODEL_RESPONSE, block=block),
     )
