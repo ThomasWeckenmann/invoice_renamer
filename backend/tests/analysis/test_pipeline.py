@@ -9,6 +9,7 @@ import pytest
 from pypdf import PdfWriter
 
 from invoice_renamer.analysis.pipeline import run_document_analysis
+from invoice_renamer.documents.format import DocumentFormat
 
 FIXTURES_DIR = Path(__file__).resolve().parent.parent.parent.parent / "fixtures"
 
@@ -89,6 +90,48 @@ def test_a_corrupt_pdf_raises_instead_of_returning_a_synthesized_result() -> Non
             model_id="qwen3-0.6b",
             model_revision=None,
             shorten_enabled=True,
+        )
+
+
+def test_jpeg_happy_path_ocrs_the_image_and_produces_a_jpg_suffixed_filename() -> None:
+    image_bytes = (FIXTURES_DIR / "scanned_invoice.jpg").read_bytes()
+    model_response = _valid_model_response()
+
+    proposal, metrics = run_document_analysis(
+        image_bytes,
+        lambda: _FakeLanguageModel(model_response),
+        model_id="qwen3-0.6b",
+        model_revision="c1899de289a04d12100db370d81485cdf75e47ca",
+        shorten_enabled=True,
+        document_format=DocumentFormat.JPEG,
+    )
+
+    assert proposal.proposed_filename == "2026-09-12_Apple_MacBook-Air_2180-EUR.jpg"
+    assert proposal.requires_review is False
+    assert metrics.pages_total == 1
+    assert metrics.pages_ocr == [1]
+    assert metrics.ocr_ms >= 0
+    assert metrics.inference_ran is True
+    # A JPEG has no PDF container, so XML routing must never even be attempted.
+    assert metrics.extraction_source == "model"
+    assert metrics.xml_status == "none"
+    assert metrics.xml_ms == 0
+    assert metrics.xml_fields_used == []
+    assert metrics.xml_attachment_name is None
+
+
+def test_a_corrupt_jpeg_raises_instead_of_returning_a_synthesized_result() -> None:
+    def _never_called() -> _FakeLanguageModel:
+        raise AssertionError("model must not load for a JPEG that fails to open")
+
+    with pytest.raises(ValueError):
+        run_document_analysis(
+            b"\xff\xd8\xffnot actually a jpeg",
+            _never_called,
+            model_id="qwen3-0.6b",
+            model_revision=None,
+            shorten_enabled=True,
+            document_format=DocumentFormat.JPEG,
         )
 
 

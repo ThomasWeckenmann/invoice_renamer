@@ -5,8 +5,9 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
+from invoice_renamer.documents.image_open import open_validated_jpeg
 from invoice_renamer.documents.ocr import OcrResult
-from invoice_renamer.documents.reader import read_document
+from invoice_renamer.documents.reader import read_document, read_image_document
 
 FIXTURES_DIR = Path(__file__).resolve().parent.parent.parent.parent / "fixtures"
 
@@ -106,3 +107,57 @@ def test_garbage_bytes_raise_value_error() -> None:
 def test_empty_bytes_raise_value_error() -> None:
     with pytest.raises(ValueError):
         read_document(b"")
+
+
+def test_jpeg_image_is_recovered_via_ocr_as_a_single_page() -> None:
+    image = open_validated_jpeg(_load("scanned_invoice.jpg"))
+
+    document = read_image_document(image)
+
+    assert len(document.pages) == 1
+    page = document.pages[0]
+    assert page.page_number == 1
+    assert page.needs_ocr is True
+    assert "Invoice #4004" in page.text
+    assert "Total: 275.00 EUR" in page.text
+    assert page.ocr_confidence is not None
+    assert page.ocr_confidence > 0.5
+    assert document.embedded_xml is None
+
+
+def test_jpeg_with_exif_orientation_is_still_recovered_correctly_via_ocr() -> None:
+    # This fixture's stored pixels are rotated 90 degrees with an EXIF
+    # Orientation=6 tag correcting them back. Before image_open normalized
+    # orientation, OCR ran on the sideways pixels and returned garbled text.
+    image = open_validated_jpeg(_load("scanned_invoice_exif_orientation_6.jpg"))
+
+    document = read_image_document(image)
+
+    page = document.pages[0]
+    assert "Invoice #5005" in page.text
+    assert "Seller: Harbor Supplies" in page.text
+    assert "Total: 610.00 EUR" in page.text
+
+
+def test_cmyk_jpeg_is_still_recovered_correctly_via_ocr() -> None:
+    # This fixture is saved in CMYK color mode (produced by some
+    # scanners/Adobe tools). Before image_open normalized color mode, this
+    # raised OSError: cannot write mode CMYK as PNG instead of recognizing
+    # any text at all.
+    image = open_validated_jpeg(_load("scanned_invoice_cmyk.jpg"))
+
+    document = read_image_document(image)
+
+    page = document.pages[0]
+    assert "Invoice #6006" in page.text
+    assert "Seller: Coastal Print Co" in page.text
+    assert "Total: 340.00 EUR" in page.text
+
+
+def test_jpeg_uses_custom_ocr_engine_when_provided() -> None:
+    image = open_validated_jpeg(_load("scanned_invoice.jpg"))
+
+    document = read_image_document(image, ocr_engine=_StubOcrEngine())
+
+    assert document.pages[0].text == "stubbed text"
+    assert document.pages[0].ocr_confidence == 0.42

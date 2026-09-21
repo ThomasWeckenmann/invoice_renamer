@@ -18,6 +18,13 @@ function importedPdf(name = "invoice.pdf"): ImportedFile {
   return { file: pdfFile(name), sourcePath: `/invoices/${name}` };
 }
 
+function importedJpeg(name = "scan.jpg"): ImportedFile {
+  return {
+    file: new File(["\xff\xd8\xff"], name, { type: "image/jpeg" }),
+    sourcePath: `/invoices/${name}`,
+  };
+}
+
 function queuedJob(overrides: Partial<AnalysisJobView> = {}): AnalysisJobView {
   return {
     id: "job-1",
@@ -88,6 +95,47 @@ describe("useBatchWorkspace", () => {
     });
     expect(result.current.items[0].proposal?.proposed_filename).toBe(
       "2026-01-05_Acme_Widget_42-EUR.pdf",
+    );
+  });
+
+  it("startAnalysis works the same for an imported JPEG scan", async () => {
+    vi.mocked(analysesApi.submitAnalysis).mockResolvedValue(queuedJob({ original_filename: "scan.jpg" }));
+    vi.mocked(analysesApi.fetchJob).mockResolvedValue(
+      queuedJob({
+        status: "completed",
+        proposal: {
+          extraction: {
+            invoice_date: "2026-01-05",
+            seller: "Acme",
+            product_summary: "Widget",
+            seller_short: null,
+            product_summary_short: null,
+            gross_total: "42.00",
+            currency: "EUR",
+            language: "en",
+            evidence: {},
+            warnings: [],
+          },
+          proposed_filename: "2026-01-05_Acme_Widget_42-EUR.jpg",
+          requires_review: false,
+          missing_fields: [],
+          warnings: [],
+        },
+        metrics: null,
+      }),
+    );
+
+    const { result } = renderHook(() => useBatchWorkspace());
+    act(() => result.current.addFiles([importedJpeg()]));
+
+    act(() => result.current.startAnalysis("granite-3.3-2b", true));
+    expect(result.current.items[0].status).toBe("queued");
+
+    await waitFor(() => expect(result.current.items[0].status).toBe("needs_review"), {
+      timeout: 3000,
+    });
+    expect(result.current.items[0].proposal?.proposed_filename).toBe(
+      "2026-01-05_Acme_Widget_42-EUR.jpg",
     );
   });
 

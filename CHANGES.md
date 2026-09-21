@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 0.36.0 (2026-09-21, claude sonnet-5)
+
+- Accept JPG/JPEG scanned invoices alongside PDF
+
+  Uploads are now sniffed by magic bytes (PDF or JPEG) instead of requiring
+  a PDF. A JPEG always goes through OCR into the same extraction pipeline
+  as a scanned PDF page, keeping a .jpg extension in its proposed filename.
+  The import dialog, drag-and-drop, and MIME typing now accept JPEG too.
+
 ## Version 0.35.0 (2026-09-20, claude sonnet-5)
 
 - Add a live memory status display and persistent model size/description details

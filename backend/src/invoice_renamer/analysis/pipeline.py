@@ -1,11 +1,12 @@
-"""Runs one PDF through the full read -> extract -> filename pipeline and times it,
-producing the same FilenameProposal/RunMetrics shape a job publishes.
+"""Runs one document through the full read -> extract -> filename pipeline and
+times it, producing the same FilenameProposal/RunMetrics shape a job publishes.
 
-Embedded invoice XML is inspected first. When it alone supplies every field the
-filename needs, page text is never read, OCR never runs, and the model is never
-loaded - `model_factory` is only called once inference actually turns out to be
-necessary, so the caller (the analysis coordinator) can tell whether it needs to
-mark its cached model as warmed.
+For a PDF, embedded invoice XML is inspected first. When it alone supplies every
+field the filename needs, page text is never read, OCR never runs, and the model
+is never loaded - `model_factory` is only called once inference actually turns out
+to be necessary, so the caller (the analysis coordinator) can tell whether it needs
+to mark its cached model as warmed. A JPEG has no PDF container to inspect for XML
+and no text layer, so it always goes straight through OCR into the model.
 """
 
 import time
@@ -20,9 +21,11 @@ from invoice_renamer.analysis.extraction_router import (
     xml_fields_used,
     xml_supplies_filename,
 )
+from invoice_renamer.documents.format import DocumentFormat
+from invoice_renamer.documents.image_open import open_validated_jpeg
 from invoice_renamer.documents.ocr import OcrEngine, OcrResult, default_ocr_engine
 from invoice_renamer.documents.pdf_open import open_validated_pdf
-from invoice_renamer.documents.reader import read_document
+from invoice_renamer.documents.reader import read_document, read_image_document
 from invoice_renamer.documents.xml_attachments import XmlDiscoveryResult
 from invoice_renamer.extraction.models import InvoiceExtraction
 from invoice_renamer.inference.extractor import extract_invoice
@@ -115,16 +118,77 @@ def _xml_only_result(
     return proposal, metrics
 
 
-def run_document_analysis(
-    pdf_bytes: bytes,
+def _run_jpeg_analysis(
+    image_bytes: bytes,
     model_factory: Callable[[], LanguageModel],
     *,
     model_id: str,
     model_revision: str | None,
     shorten_enabled: bool,
 ) -> tuple[FilenameProposal, RunMetrics]:
+    """A JPEG has no embedded XML to route and no text layer to try first - it
+    always goes straight to OCR, then the same extract/shorten steps the PDF
+    path uses once it needs the model. A failure here has no partial XML to
+    preserve, so it propagates and fails the job exactly as an ordinary
+    (non-XML) PDF failure already does."""
+    ocr_engine = _TimingOcrEngine(default_ocr_engine())
+    read_start = time.perf_counter()
+    image = open_validated_jpeg(image_bytes)
+    document = read_image_document(image, ocr_engine=ocr_engine)
+    read_ms = int((time.perf_counter() - read_start) * 1000)
+    ocr_ms = ocr_engine.elapsed_ms
+    image_read_ms = max(read_ms - ocr_ms, 0)
+
+    recording_model = _RecordingLanguageModel(model_factory())
+    inference_start = time.perf_counter()
+    extraction = extract_invoice(document, recording_model)
+    if shorten_enabled:
+        try:
+            recording_model.phase = "shortening"
+            extraction = shorten_fields(extraction, recording_model)
+        except Exception as error:
+            extraction = extraction.model_copy(
+                update={"warnings": [*extraction.warnings, f"field shortening failed: {error}"]}
+            )
+    inference_ms = int((time.perf_counter() - inference_start) * 1000)
+
+    proposal = build_filename_proposal(extraction, document_format=DocumentFormat.JPEG)
+    metrics = RunMetrics(
+        total_ms=image_read_ms + ocr_ms + inference_ms,
+        pdf_extraction_ms=image_read_ms,
+        ocr_ms=ocr_ms,
+        inference_ms=inference_ms,
+        model_id=model_id,
+        provider="transformers",
+        model_revision=model_revision,
+        pages_total=1,
+        pages_ocr=[1],
+        warnings=extraction.warnings,
+        model_calls=recording_model.calls,
+    )
+    return proposal, metrics
+
+
+def run_document_analysis(
+    document_bytes: bytes,
+    model_factory: Callable[[], LanguageModel],
+    *,
+    model_id: str,
+    model_revision: str | None,
+    shorten_enabled: bool,
+    document_format: DocumentFormat = DocumentFormat.PDF,
+) -> tuple[FilenameProposal, RunMetrics]:
+    if document_format is DocumentFormat.JPEG:
+        return _run_jpeg_analysis(
+            document_bytes,
+            model_factory,
+            model_id=model_id,
+            model_revision=model_revision,
+            shorten_enabled=shorten_enabled,
+        )
+
     xml_start = time.perf_counter()
-    reader, page_count = open_validated_pdf(pdf_bytes)
+    reader, page_count = open_validated_pdf(document_bytes)
     xml_result, xml_extraction = route_xml(reader)
     xml_ms = int((time.perf_counter() - xml_start) * 1000)
     fields_from_xml = xml_fields_used(xml_extraction)
@@ -184,7 +248,7 @@ def run_document_analysis(
         ocr_engine = _TimingOcrEngine(default_ocr_engine())
         read_start = time.perf_counter()
         document = read_document(
-            pdf_bytes, ocr_engine=ocr_engine, reader=reader, xml_result=xml_result
+            document_bytes, ocr_engine=ocr_engine, reader=reader, xml_result=xml_result
         )
         read_ms = int((time.perf_counter() - read_start) * 1000)
         ocr_ms = ocr_engine.elapsed_ms

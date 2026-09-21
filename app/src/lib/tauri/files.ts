@@ -16,7 +16,18 @@ async function readFileBytes(path: string): Promise<ArrayBuffer> {
   return buffer;
 }
 
+const MIME_TYPES_BY_EXTENSION: Record<string, string> = {
+  pdf: "application/pdf",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+};
+
+function mimeTypeForPath(path: string): string {
+  const extension = path.split(".").pop()?.toLowerCase() ?? "";
+  return MIME_TYPES_BY_EXTENSION[extension] ?? "application/octet-stream";
+}
+
 export async function readPathAsFile(path: string): Promise<File> {
   const buffer = await readFileBytes(path);
-  return new File([buffer], basename(path), { type: "application/pdf" });
+  return new File([buffer], basename(path), { type: mimeTypeForPath(path) });
 }

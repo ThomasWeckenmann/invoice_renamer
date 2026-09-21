@@ -3,6 +3,7 @@
 from datetime import date
 from decimal import Decimal
 
+from invoice_renamer.documents.format import DocumentFormat
 from invoice_renamer.extraction.models import InvoiceExtraction
 from invoice_renamer.naming.builder import build_filename_proposal
 
@@ -57,6 +58,18 @@ def test_warnings_force_review_even_when_fields_are_complete() -> None:
 
     assert proposal.requires_review is True
     assert proposal.missing_fields == []
+
+
+def test_jpeg_source_gets_a_jpg_extension_instead_of_pdf() -> None:
+    proposal = build_filename_proposal(_extraction(), document_format=DocumentFormat.JPEG)
+
+    assert proposal.proposed_filename == "2026-09-12_Apple_MacBook-Air_2180-EUR.jpg"
+
+
+def test_pdf_is_still_the_default_extension() -> None:
+    proposal = build_filename_proposal(_extraction())
+
+    assert proposal.proposed_filename.endswith(".pdf")
 
 
 def test_short_fields_are_preferred_over_the_full_seller_and_product() -> None:

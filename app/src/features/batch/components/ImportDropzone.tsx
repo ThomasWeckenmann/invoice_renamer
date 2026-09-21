@@ -1,9 +1,10 @@
-/** Import surface for PDF invoices: a native open dialog for browsing, and
- * window-level drag-and-drop. Both return real filesystem paths, which the
- * later rename step needs and a plain `<input type=file>` cannot provide. */
+/** Import surface for PDF and JPEG invoices: a native open dialog for
+ * browsing, and window-level drag-and-drop. Both return real filesystem
+ * paths, which the later rename step needs and a plain `<input type=file>`
+ * cannot provide. */
 
 import { useEffect, useRef, useState } from "react";
-import { pickPdfFiles } from "../../../lib/tauri/dialog";
+import { pickInvoiceFiles } from "../../../lib/tauri/dialog";
 import { subscribeToDragDrop } from "../../../lib/tauri/dragDrop";
 import { readPathAsFile } from "../../../lib/tauri/files";
 import type { ImportedFile } from "../types";
@@ -13,8 +14,11 @@ interface ImportDropzoneProps {
   onImportError: (message: string) => void;
 }
 
-function isPdfPath(path: string): boolean {
-  return path.toLowerCase().endsWith(".pdf");
+const SUPPORTED_EXTENSIONS = [".pdf", ".jpg", ".jpeg"];
+
+function isSupportedInvoicePath(path: string): boolean {
+  const lowerPath = path.toLowerCase();
+  return SUPPORTED_EXTENSIONS.some((extension) => lowerPath.endsWith(extension));
 }
 
 function errorMessage(err: unknown): string {
@@ -23,7 +27,7 @@ function errorMessage(err: unknown): string {
 
 async function importPaths(paths: string[]): Promise<ImportedFile[]> {
   const imported: ImportedFile[] = [];
-  for (const sourcePath of paths.filter(isPdfPath)) {
+  for (const sourcePath of paths.filter(isSupportedInvoicePath)) {
     const file = await readPathAsFile(sourcePath);
     imported.push({ file, sourcePath });
   }
@@ -55,7 +59,7 @@ export function ImportDropzone({ onFilesImported, onImportError }: ImportDropzon
   }, []);
 
   const handleBrowse = () => {
-    pickPdfFiles()
+    pickInvoiceFiles()
       .then(importPaths)
       .then(onFilesImportedRef.current)
       .catch((err: unknown) => onImportErrorRef.current(errorMessage(err)));
@@ -64,7 +68,7 @@ export function ImportDropzone({ onFilesImported, onImportError }: ImportDropzon
   return (
     <div className={`import-dropzone${isDragOver ? " import-dropzone--active" : ""}`}>
       <p className="import-dropzone__label">
-        <strong>Drag PDF invoices here</strong>
+        <strong>Drag PDF or JPG invoices here</strong>
       </p>
       <span className="import-dropzone__spacer" />
       <button type="button" className="btn sm" onClick={handleBrowse}>

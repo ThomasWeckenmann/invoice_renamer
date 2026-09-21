@@ -1,6 +1,7 @@
 """Builds a proposed filename from a validated invoice extraction.
 
-Format: YYYY-MM-DD_Seller_Product_Amount-CURRENCY.pdf
+Format: YYYY-MM-DD_Seller_Product_Amount-CURRENCY, keeping the source
+document's own extension (.pdf or .jpg).
 """
 
 import re
@@ -8,6 +9,7 @@ import unicodedata
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 
+from invoice_renamer.documents.format import DocumentFormat
 from invoice_renamer.extraction.models import InvoiceExtraction
 from invoice_renamer.naming.schema import FilenameProposal
 
@@ -87,7 +89,9 @@ def _truncated_fields(
     return ["date", "seller", "product"]
 
 
-def build_filename_proposal(extraction: InvoiceExtraction) -> FilenameProposal:
+def build_filename_proposal(
+    extraction: InvoiceExtraction, *, document_format: DocumentFormat = DocumentFormat.PDF
+) -> FilenameProposal:
     date_part, date_missing = _format_date(extraction.invoice_date)
     seller_part, seller_missing = _normalize_segment(extraction.seller_short or extraction.seller)
     product_part, product_missing = _normalize_segment(
@@ -129,7 +133,7 @@ def build_filename_proposal(extraction: InvoiceExtraction) -> FilenameProposal:
 
     return FilenameProposal(
         extraction=extraction,
-        proposed_filename=f"{stem}.pdf",
+        proposed_filename=f"{stem}{document_format.extension}",
         requires_review=requires_review,
         missing_fields=missing_fields,
         warnings=warnings,

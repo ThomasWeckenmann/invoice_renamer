@@ -169,7 +169,35 @@ describe("BatchItemRow", () => {
     expect(screen.getByText("3.5 s")).toBeInTheDocument();
     expect(screen.getByText("3 (1 via OCR)")).toBeInTheDocument();
     expect(screen.getByText("512 in / 64 out (12.5 tok/s)")).toBeInTheDocument();
-    expect(screen.getByText("PDF text + AI (OCR)")).toBeInTheDocument();
+    expect(screen.getByText("Document text + AI (OCR)")).toBeInTheDocument();
+  });
+
+  it("shows a JPEG-sourced run the same way as a PDF one, with no PDF-specific wording", () => {
+    render(
+      <ul>
+        <BatchItemRow
+          item={reviewItem({
+            file: new File(["\xff\xd8\xff"], "scan.jpg", { type: "image/jpeg" }),
+            sourcePath: "/invoices/scan.jpg",
+            proposal: {
+              ...reviewItem().proposal!,
+              proposed_filename: "2026-01-05_Acme_Widget_42-EUR.jpg",
+            },
+            metrics: runMetrics({ pages_ocr: [1] }),
+          })}
+          onEditFilename={noop}
+          onApprove={noop}
+          onUnapprove={noop}
+          onCancel={noop}
+          onAnalyze={noop}
+          canAnalyze={true}
+          onRemove={noop}
+        />
+      </ul>,
+    );
+
+    expect(screen.getByText("Document text + AI (OCR)")).toBeInTheDocument();
+    expect(screen.queryByText(/PDF/)).not.toBeInTheDocument();
   });
 
   it("omits the AI-calls info button when no model calls were recorded", () => {

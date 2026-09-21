@@ -3,6 +3,7 @@ short to be usable. Embedded ZUGFeRD/Factur-X XML discovery lives in
 xml_attachments.py, so it can run without paying for this module's page/OCR work.
 """
 
+from PIL import Image
 from pypdf import PdfReader
 from pypdf._page import PageObject
 
@@ -50,6 +51,19 @@ def read_document(
         embedded_xml = xml_result.candidate.raw_bytes.decode("utf-8", errors="replace")
 
     return NormalizedDocument(pages=pages, embedded_xml=embedded_xml)
+
+
+def read_image_document(
+    image: Image.Image, *, ocr_engine: OcrEngine | None = None
+) -> NormalizedDocument:
+    """Reads a single-page scanned image via OCR. Unlike a PDF page, an image
+    never has a text layer to try first - it always goes straight to OCR."""
+    ocr_engine = ocr_engine or default_ocr_engine()
+    result = ocr_engine.recognize(image, language="eng+deu")
+    page = PageText(
+        page_number=1, text=result.text, needs_ocr=True, ocr_confidence=result.confidence
+    )
+    return NormalizedDocument(pages=[page])
 
 
 def _read_page(index: int, page: PageObject, pdf_bytes: bytes, ocr_engine: OcrEngine) -> PageText:

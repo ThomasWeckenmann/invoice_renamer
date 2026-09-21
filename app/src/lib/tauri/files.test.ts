@@ -32,4 +32,21 @@ describe("readPathAsFile", () => {
     expect(file.type).toBe("application/pdf");
     expect(file.size).toBe(4);
   });
+
+  it("builds a JPEG File for a .jpg path", async () => {
+    mockedInvoke.mockResolvedValue([0xff, 0xd8, 0xff]);
+
+    const file = await readPathAsFile("/invoices/scan.jpg");
+
+    expect(file.name).toBe("scan.jpg");
+    expect(file.type).toBe("image/jpeg");
+  });
+
+  it("builds a JPEG File for a .jpeg path", async () => {
+    mockedInvoke.mockResolvedValue([0xff, 0xd8, 0xff]);
+
+    const file = await readPathAsFile("/invoices/scan.jpeg");
+
+    expect(file.type).toBe("image/jpeg");
+  });
 });

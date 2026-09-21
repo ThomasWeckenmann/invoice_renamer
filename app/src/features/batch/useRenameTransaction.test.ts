@@ -118,6 +118,49 @@ describe("useRenameTransaction", () => {
     await waitFor(() => expect(result.current.canUndo).toBe(true));
   });
 
+  it("renames a JPEG-sourced item the same way as a PDF one", async () => {
+    vi.mocked(renameApi.listRenameBatches).mockResolvedValueOnce([]).mockResolvedValue([batchSummary()]);
+    vi.mocked(renameApi.renameBatch).mockResolvedValue({
+      batch_id: "batch-1",
+      results: [
+        {
+          request_id: "item-1",
+          outcome: "renamed",
+          source_path: "/invoices/scan.jpg",
+          destination_path: "/invoices/2026-01-05_Acme_Widget_42-EUR.jpg",
+        },
+      ],
+      history_warning: null,
+    });
+
+    const { result } = renderHook(() => useRenameTransaction());
+    const items = [
+      approvedItem({
+        file: new File(["\xff\xd8\xff"], "scan.jpg", { type: "image/jpeg" }),
+        sourcePath: "/invoices/scan.jpg",
+        proposal: {
+          ...approvedItem().proposal!,
+          proposed_filename: "2026-01-05_Acme_Widget_42-EUR.jpg",
+        },
+      }),
+    ];
+
+    act(() => result.current.renameApproved(items));
+
+    await waitFor(() => expect(result.current.isRenaming).toBe(false));
+    expect(renameApi.renameBatch).toHaveBeenCalledWith([
+      {
+        request_id: "item-1",
+        source_path: "/invoices/scan.jpg",
+        desired_filename: "2026-01-05_Acme_Widget_42-EUR.jpg",
+      },
+    ]);
+    expect(result.current.outcomes["item-1"]).toEqual({
+      status: "renamed",
+      destinationPath: "/invoices/2026-01-05_Acme_Widget_42-EUR.jpg",
+    });
+  });
+
   it("keeps duplicate-source-path rows distinct, since only request id correlates results", async () => {
     // Two rows imported from the same source path (e.g. the file was
     // picked twice). Rust can only actually rename the first one - its

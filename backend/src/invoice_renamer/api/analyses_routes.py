@@ -12,6 +12,8 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 
 from invoice_renamer.analysis.pipeline import run_document_analysis
+from invoice_renamer.documents.format import DocumentFormat, detect_document_format
+from invoice_renamer.documents.image_open import open_validated_jpeg
 from invoice_renamer.inference.language_model import LanguageModel
 from invoice_renamer.inference.runtime import (
     LoadInstalledFn,
@@ -30,8 +32,7 @@ from invoice_renamer.naming.schema import FilenameProposal
 analyses_router = APIRouter()
 
 _MAX_UPLOAD_BYTES = 50 * 1024 * 1024
-_MAX_PENDING_BYTES = 500 * 1024 * 1024  # ~10 max-size PDFs queued/running at once
-_PDF_MAGIC = b"%PDF-"
+_MAX_PENDING_BYTES = 500 * 1024 * 1024  # ~10 max-size documents queued/running at once
 
 
 class JobStatus(str, Enum):
@@ -48,7 +49,8 @@ class AnalysisJob:
     model_id: str
     original_filename: str
     status: JobStatus
-    pdf_bytes: bytes | None  # dropped once terminal
+    document_bytes: bytes | None  # dropped once terminal
+    document_format: DocumentFormat
     shorten_fields: bool = True
     proposal: FilenameProposal | None = None
     metrics: RunMetrics | None = None
@@ -124,9 +126,10 @@ class AnalysisCoordinator:
     def submit(
         self,
         entry: ModelCatalogEntry,
-        pdf_bytes: bytes,
+        document_bytes: bytes,
         original_filename: str,
         *,
+        document_format: DocumentFormat,
         shorten_fields: bool = True,
     ) -> AnalysisJob:
         if not is_installed(entry, self._data_dir):
@@ -136,16 +139,18 @@ class AnalysisCoordinator:
             model_id=entry.id,
             original_filename=original_filename,
             status=JobStatus.QUEUED,
-            pdf_bytes=pdf_bytes,
+            document_bytes=document_bytes,
+            document_format=document_format,
             shorten_fields=shorten_fields,
         )
         with self._condition:
             pending = sum(
-                len(j.pdf_bytes)
+                len(j.document_bytes)
                 for j in self._jobs.values()
-                if j.status in (JobStatus.QUEUED, JobStatus.RUNNING) and j.pdf_bytes is not None
+                if j.status in (JobStatus.QUEUED, JobStatus.RUNNING)
+                and j.document_bytes is not None
             )
-            if pending + len(pdf_bytes) > _MAX_PENDING_BYTES:
+            if pending + len(document_bytes) > _MAX_PENDING_BYTES:
                 raise HTTPException(
                     429, "pending analysis queue is full; retry once earlier jobs complete"
                 )
@@ -175,7 +180,7 @@ class AnalysisCoordinator:
                     # it like the RUNNING case below on a later call if needed.
                     pass
                 else:
-                    job.status, job.pdf_bytes = JobStatus.CANCELLED, None
+                    job.status, job.document_bytes = JobStatus.CANCELLED, None
             elif job.status is JobStatus.RUNNING:
                 job.cancel_requested = True
             return job
@@ -203,17 +208,18 @@ class AnalysisCoordinator:
                 return model
 
             try:
-                assert job.pdf_bytes is not None
+                assert job.document_bytes is not None
                 proposal, metrics = run_document_analysis(
-                    job.pdf_bytes,
+                    job.document_bytes,
                     load_model,
                     model_id=entry.id,
                     model_revision=entry.revision,
                     shorten_enabled=job.shorten_fields,
+                    document_format=job.document_format,
                 )
             except Exception as exc:
                 with self._lock:
-                    job.status, job.error, job.pdf_bytes = JobStatus.FAILED, str(exc), None
+                    job.status, job.error, job.document_bytes = JobStatus.FAILED, str(exc), None
                 continue
             finally:
                 # Drops this loop's own reference to the extractor (success or
@@ -231,7 +237,7 @@ class AnalysisCoordinator:
                         proposal,
                         metrics,
                     )
-                job.pdf_bytes = None
+                job.document_bytes = None
 
 
 @analyses_router.post("/analyses", status_code=202)
@@ -243,18 +249,28 @@ async def create_analysis(
 ) -> AnalysisJobView:
     entry = _entry_or_404(model_id)
 
-    pdf_bytes = b""
+    document_bytes = b""
     while chunk := await file.read(1024 * 1024):
-        pdf_bytes += chunk
-        if len(pdf_bytes) > _MAX_UPLOAD_BYTES:
+        document_bytes += chunk
+        if len(document_bytes) > _MAX_UPLOAD_BYTES:
             raise HTTPException(413, f"upload exceeds the {_MAX_UPLOAD_BYTES}-byte limit")
 
-    if not pdf_bytes.startswith(_PDF_MAGIC):
-        raise HTTPException(422, "upload is not a PDF file")
+    document_format = detect_document_format(document_bytes)
+    if document_format is None:
+        raise HTTPException(422, "upload must be a PDF or JPEG file")
+    if document_format is DocumentFormat.JPEG:
+        try:
+            open_validated_jpeg(document_bytes)
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
 
     coordinator: AnalysisCoordinator = request.app.state.analysis_coordinator
     job = coordinator.submit(
-        entry, pdf_bytes, file.filename or "upload.pdf", shorten_fields=shorten_fields
+        entry,
+        document_bytes,
+        file.filename or f"upload{document_format.extension}",
+        document_format=document_format,
+        shorten_fields=shorten_fields,
     )
     return _job_view(job)
 

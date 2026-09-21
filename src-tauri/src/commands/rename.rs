@@ -394,6 +394,12 @@ mod tests {
     }
 
     #[test]
+    fn split_stem_and_extension_handles_jpeg_scans_too() {
+        assert_eq!(split_stem_and_extension("scan.jpg"), ("scan", ".jpg"));
+        assert_eq!(split_stem_and_extension("scan.jpeg"), ("scan", ".jpeg"));
+    }
+
+    #[test]
     fn resolve_destination_is_stable_when_nothing_collides() {
         let dir = unique_test_dir("no-collision");
         let source = dir.join("source.pdf");

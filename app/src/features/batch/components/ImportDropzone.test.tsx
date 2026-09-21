@@ -64,7 +64,22 @@ describe("ImportDropzone", () => {
     await waitFor(() => expect(onImportError).toHaveBeenCalledWith("permission denied"));
   });
 
-  it("imports PDF paths dropped on the window and ignores non-PDF paths", async () => {
+  it("reads bytes for a JPEG path chosen via the native dialog", async () => {
+    mockedOpen.mockResolvedValue(["/invoices/scan.jpg"]);
+    mockedInvoke.mockResolvedValue(Array.from(new Uint8Array([0xff, 0xd8, 0xff])));
+    const onFilesImported = vi.fn();
+
+    render(<ImportDropzone onFilesImported={onFilesImported} onImportError={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
+
+    await waitFor(() => expect(onFilesImported).toHaveBeenCalledTimes(1));
+    const [imported] = onFilesImported.mock.calls[0] as [ImportedFile[]];
+    expect(imported).toHaveLength(1);
+    expect(imported[0].sourcePath).toBe("/invoices/scan.jpg");
+    expect(imported[0].file.type).toBe("image/jpeg");
+  });
+
+  it("imports PDF and JPEG paths dropped on the window and ignores unsupported paths", async () => {
     type DragDropHandler = Parameters<ReturnType<typeof getCurrentWebview>["onDragDropEvent"]>[0];
     let dragDropHandler: DragDropHandler | undefined;
     mockedGetCurrentWebview.mockReturnValue({
@@ -84,14 +99,15 @@ describe("ImportDropzone", () => {
       id: 1,
       payload: {
         type: "drop",
-        paths: ["/invoices/dropped.pdf", "/invoices/notes.txt"],
+        paths: ["/invoices/dropped.pdf", "/invoices/scan.jpg", "/invoices/notes.txt"],
         position: { x: 0, y: 0 } as never,
       },
     });
 
     await waitFor(() => expect(onFilesImported).toHaveBeenCalledTimes(1));
     const [imported] = onFilesImported.mock.calls[0] as [ImportedFile[]];
-    expect(imported).toHaveLength(1);
+    expect(imported).toHaveLength(2);
     expect(imported[0].sourcePath).toBe("/invoices/dropped.pdf");
+    expect(imported[1].sourcePath).toBe("/invoices/scan.jpg");
   });
 });

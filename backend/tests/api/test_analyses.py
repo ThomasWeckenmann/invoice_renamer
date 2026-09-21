@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from invoice_renamer.api import analyses_routes
 from invoice_renamer.api.app import create_app
+from invoice_renamer.documents import image_open
 from invoice_renamer.inference.transformers_extractor import TransformersExtractor
 from invoice_renamer.models.catalog import MemoryTier, ModelCatalogEntry, ModelFile
 from invoice_renamer.models.installer import _marker_payload, install_dir_for
@@ -23,6 +24,7 @@ _MODEL_A = "model-a"
 _MODEL_B = "model-b"
 
 _VALID_PDF = (FIXTURES_DIR / "selectable_text_en.pdf").read_bytes()
+_VALID_JPEG = (FIXTURES_DIR / "scanned_invoice.jpg").read_bytes()
 _VALID_MODEL_RESPONSE = json.dumps(
     {
         "invoice_date": "2026-09-12",
@@ -79,6 +81,19 @@ def _submit(
         headers=_auth_headers(),
         data=data,
         files={"file": ("invoice.pdf", pdf_bytes, "application/pdf")},
+    )
+    assert response.status_code == 202, response.text
+    return response.json()
+
+
+def _submit_jpeg(
+    client: TestClient, model_id: str, jpeg_bytes: bytes = _VALID_JPEG
+) -> dict[str, object]:
+    response = client.post(
+        "/analyses",
+        headers=_auth_headers(),
+        data={"model_id": model_id},
+        files={"file": ("invoice.jpg", jpeg_bytes, "image/jpeg")},
     )
     assert response.status_code == 202, response.text
     return response.json()
@@ -174,6 +189,77 @@ def test_unknown_model_id_is_404(client: TestClient) -> None:
     )
 
     assert response.status_code == 404
+
+
+def test_valid_jpeg_upload_is_accepted_and_completes(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry = _entry(_MODEL_A)
+    _install(entry, tmp_path)
+    monkeypatch.setattr(
+        TransformersExtractor,
+        "load_installed",
+        lambda entry, data_dir, *, device: _FakeExtractor(_VALID_MODEL_RESPONSE),
+    )
+
+    submitted = _submit_jpeg(client, _MODEL_A)
+    assert submitted["status"] == "queued"
+
+    completed = _poll_until(client, submitted["id"], terminal_statuses=("completed", "failed"))
+
+    assert completed["status"] == "completed"
+    assert completed["proposal"]["proposed_filename"] == "2026-09-12_Apple_MacBook-Air_2180-EUR.jpg"
+    assert completed["metrics"]["pages_total"] == 1
+    assert completed["metrics"]["extraction_source"] == "model"
+    assert completed["metrics"]["xml_status"] == "none"
+    assert completed["error"] is None
+
+
+def test_corrupt_jpeg_upload_is_422_and_never_creates_a_job(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry = _entry(_MODEL_A)
+    _install(entry, tmp_path)
+    calls: list[object] = []
+    monkeypatch.setattr(
+        TransformersExtractor,
+        "load_installed",
+        lambda entry, data_dir, *, device: calls.append(1) or _FakeExtractor(_VALID_MODEL_RESPONSE),
+    )
+
+    response = client.post(
+        "/analyses",
+        headers=_auth_headers(),
+        data={"model_id": _MODEL_A},
+        files={"file": ("invoice.jpg", b"\xff\xd8\xffnot actually a jpeg", "image/jpeg")},
+    )
+
+    assert response.status_code == 422
+    assert calls == []
+
+
+def test_oversized_jpeg_dimensions_is_422_and_never_creates_a_job(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry = _entry(_MODEL_A)
+    _install(entry, tmp_path)
+    calls: list[object] = []
+    monkeypatch.setattr(
+        TransformersExtractor,
+        "load_installed",
+        lambda entry, data_dir, *, device: calls.append(1) or _FakeExtractor(_VALID_MODEL_RESPONSE),
+    )
+    monkeypatch.setattr(image_open, "MAX_DIMENSION_PIXELS", 10)
+
+    response = client.post(
+        "/analyses",
+        headers=_auth_headers(),
+        data={"model_id": _MODEL_A},
+        files={"file": ("invoice.jpg", _VALID_JPEG, "image/jpeg")},
+    )
+
+    assert response.status_code == 422
+    assert calls == []
 
 
 def test_non_pdf_upload_is_422_and_never_creates_a_job(
@@ -471,7 +557,7 @@ def test_upload_past_the_size_limit_is_413(
     assert response.status_code == 413
 
 
-def test_terminal_job_drops_its_pdf_bytes(
+def test_terminal_job_drops_its_document_bytes(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     entry = _entry(_MODEL_A)
@@ -486,7 +572,7 @@ def test_terminal_job_drops_its_pdf_bytes(
     _poll_until(client, submitted["id"], terminal_statuses=("completed", "failed"))
 
     coordinator: analyses_routes.AnalysisCoordinator = client.app.state.analysis_coordinator  # type: ignore[attr-defined]
-    assert coordinator.get(submitted["id"]).pdf_bytes is None
+    assert coordinator.get(submitted["id"]).document_bytes is None
 
 
 # --- Embedded ZUGFeRD/Factur-X XML: happy path end-to-end ---

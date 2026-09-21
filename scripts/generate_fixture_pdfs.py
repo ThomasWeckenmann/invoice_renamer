@@ -1,8 +1,9 @@
-"""Generates the synthetic (non-sensitive) PDF fixtures used by backend tests."""
+"""Generates the synthetic (non-sensitive) PDF and JPEG fixtures used by backend tests."""
 
 from pathlib import Path
 
 import pypdfium2 as pdfium
+from PIL import Image
 from pypdf import PdfWriter
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
@@ -154,6 +155,61 @@ def _sparse_whitespace_pdf(path: Path) -> None:
     c.save()
 
 
+def _scanned_invoice_jpeg(path: Path, lines: list[str]) -> None:
+    """Builds a rasterized-text-only JPEG scan, the same rendering
+    _scanned_page_pdf uses for its OCR fixtures, saved directly as an image
+    instead of being re-embedded in a PDF - exercises the JPEG OCR path.
+    """
+    text_pdf_path = path.with_suffix(".tmp.pdf")
+    _text_page_pdf(text_pdf_path, lines)
+
+    document = pdfium.PdfDocument(str(text_pdf_path))
+    image = document[0].render(scale=2.0).to_pil()
+    document.close()
+    text_pdf_path.unlink()
+
+    image.convert("RGB").save(path, "JPEG", quality=95)
+
+
+def _scanned_invoice_jpeg_exif_rotated(path: Path, lines: list[str]) -> None:
+    """Same rendering as _scanned_invoice_jpeg, but the stored pixels are
+    rotated 90 degrees with an EXIF Orientation=6 tag correcting them back -
+    simulating a phone/scanner photo that needs orientation normalization
+    before OCR, not just decoding.
+    """
+    text_pdf_path = path.with_suffix(".tmp.pdf")
+    _text_page_pdf(text_pdf_path, lines)
+
+    document = pdfium.PdfDocument(str(text_pdf_path))
+    upright = document[0].render(scale=2.0).to_pil().convert("RGB")
+    document.close()
+    text_pdf_path.unlink()
+
+    # Orientation=6 means a viewer must rotate the stored pixels 90 CW to
+    # reach the upright image - so the raw pixels stored here are the
+    # upright image pre-rotated 90 CCW (PIL's ROTATE_90 constant).
+    rotated = upright.transpose(Image.ROTATE_90)
+    exif = Image.Exif()
+    exif[0x0112] = 6  # Orientation tag
+    rotated.save(path, "JPEG", quality=95, exif=exif.tobytes())
+
+
+def _scanned_invoice_jpeg_cmyk(path: Path, lines: list[str]) -> None:
+    """Same rendering as _scanned_invoice_jpeg, but saved in CMYK color mode -
+    produced by some scanners/Adobe tools - to exercise the JPEG OCR path's
+    color-mode normalization rather than its default RGB case.
+    """
+    text_pdf_path = path.with_suffix(".tmp.pdf")
+    _text_page_pdf(text_pdf_path, lines)
+
+    document = pdfium.PdfDocument(str(text_pdf_path))
+    image = document[0].render(scale=2.0).to_pil()
+    document.close()
+    text_pdf_path.unlink()
+
+    image.convert("CMYK").save(path, "JPEG", quality=95)
+
+
 def _blank_page_pdf(path: Path) -> None:
     c = canvas.Canvas(str(path), pagesize=_PAGE_SIZE)
     c.showPage()
@@ -200,6 +256,18 @@ def main() -> None:
     _scanned_page_pdf(
         FIXTURES_DIR / "scanned_invoice_de.pdf",
         ["Rechnung Nr. 3003", "Verkaeufer: Mueller GmbH", "Betrag: 199,00 EUR"],
+    )
+    _scanned_invoice_jpeg(
+        FIXTURES_DIR / "scanned_invoice.jpg",
+        ["Invoice #4004", "Seller: Global Traders", "Total: 275.00 EUR"],
+    )
+    _scanned_invoice_jpeg_exif_rotated(
+        FIXTURES_DIR / "scanned_invoice_exif_orientation_6.jpg",
+        ["Invoice #5005", "Seller: Harbor Supplies", "Total: 610.00 EUR"],
+    )
+    _scanned_invoice_jpeg_cmyk(
+        FIXTURES_DIR / "scanned_invoice_cmyk.jpg",
+        ["Invoice #6006", "Seller: Coastal Print Co", "Total: 340.00 EUR"],
     )
 
     mixed_text_page = FIXTURES_DIR / "_mixed_text_page.pdf"

@@ -26,7 +26,7 @@ export function formatDuration(ms: number): string {
 const SOURCE_LABELS: Record<RunMetrics["extraction_source"], string> = {
   xml: "ZUGFeRD / Factur-X XML",
   xml_and_model: "XML + AI",
-  model: "PDF text + AI",
+  model: "Document text + AI",
 };
 
 /** How the run's field values were produced, for the Run details disclosure. */
