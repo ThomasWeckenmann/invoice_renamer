@@ -18,6 +18,12 @@ use tokio::time::timeout;
 
 pub const SESSION_TOKEN_ENV_VAR: &str = "INVOICE_RENAMER_SESSION_TOKEN";
 pub const PORT_ENV_VAR: &str = "INVOICE_RENAMER_PORT";
+/// Our own pid, given to the worker so its parent-death detection
+/// (`backend/packaging/worker_entrypoint.py`) has a fixed pid to watch from
+/// startup - one it was told, rather than one it would otherwise have to
+/// discover via `getppid()`, which already reads as whatever process it got
+/// reparented to if we died before it got there.
+pub const PARENT_PID_ENV_VAR: &str = "INVOICE_RENAMER_PARENT_PID";
 
 const READY_MARKER: &str = "INVOICE_RENAMER_WORKER_READY";
 const SIDECAR_NAME: &str = "invoice-renamer-worker";
@@ -245,6 +251,7 @@ pub async fn spawn_worker<R: Runtime>(app: &AppHandle<R>) -> Result<WorkerHandle
     std_command
         .env(SESSION_TOKEN_ENV_VAR, &token)
         .env(PORT_ENV_VAR, port.to_string())
+        .env(PARENT_PID_ENV_VAR, std::process::id().to_string())
         .stdout(Stdio::piped())
         .stdin(Stdio::piped())
         .stderr(Stdio::piped());

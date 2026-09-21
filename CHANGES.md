@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 0.36.1 (2026-09-21, claude sonnet-5)
+
+- bugfix: make the sidecar worker self-exit if its parent process dies abruptly
+
+  Graceful shutdown already handles a normal app exit, but never runs on a
+  force-quit, crash, or OOM-kill. The worker now watches its own parent from
+  startup (prctl(PR_SET_PDEATHSIG) on Linux, a background pid poll on
+  macOS), checked against a pid Tauri hands it at spawn.
+
 ## Version 0.36.0 (2026-09-21, claude sonnet-5)
 
 - Accept JPG/JPEG scanned invoices alongside PDF
