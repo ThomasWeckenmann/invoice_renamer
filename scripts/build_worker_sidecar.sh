@@ -67,6 +67,7 @@ echo "Building $sidecar_name for $target_triple with PyInstaller ($mode)..."
     --specpath "$build_root" \
     --add-data "$backend_dir/THIRD-PARTY-LICENSES:." \
     --collect-binaries llama_cpp \
+    --exclude-module torch \
     packaging/worker_entrypoint.py
   # --collect-binaries llama_cpp: llama-cpp-python ships its compiled
   # libllama/libggml* shared libraries as plain package data under
@@ -77,6 +78,14 @@ echo "Building $sidecar_name for $target_triple with PyInstaller ($mode)..."
   # llama_cpp/lib/ subdirectory layout load_shared_library() expects
   # relative to the package (confirmed against the installed binding's
   # source and a real onedir build in the isolated Linux mirror).
+  # --exclude-module torch: nothing on the app's actual runtime path imports
+  # torch (confirmed live by hiding it from Python's import system entirely
+  # and re-running a real extraction), but PyInstaller's static analysis
+  # still pulls it in because transformers' Auto-class hook force-collects
+  # transformers.models.* submodules, many of which have a top-level `import
+  # torch` that this app's tokenizer-only path never reaches. Excluding it
+  # shrinks the bundle substantially; safe only because memory_status.py no
+  # longer imports torch at all (see inference/memory_status.py).
   # --add-data's source must be absolute: a relative one resolves against
   # --specpath, not this subshell's cwd - confirmed by a throwaway build,
   # since PyInstaller's own docs don't spell this out. Its destination "."

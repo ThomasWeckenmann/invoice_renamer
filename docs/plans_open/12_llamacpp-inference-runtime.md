@@ -24,7 +24,18 @@ sidecar or run through the real app) — see Block 8, added 2026-09-22.
 Block 4 code complete (`gpu_in_use: bool` replaces the dead torch-specific
 `GpuMemorySnapshot`/`gpu` shape; `memory_status.py` no longer imports torch
 at all; all unit tests/ruff/mypy/lint/build green) — see the note at the
-end of Block 4, added 2026-09-22.
+end of Block 4, added 2026-09-22. Block 5 code complete
+(`--exclude-module torch` added to `scripts/build_worker_sidecar.sh`;
+Linux frozen-worker rebuild confirmed torch fully excluded from the bundle
+and every torch-free code path — `/models`, `/memory` mid-load, real GGUF
+loading start — working correctly against the real Llama 3.2 catalog entry,
+incidentally also rebuilding the sidecar Block 8 left un-rebuilt; macOS
+confirmed live by the user via a real release build - model load, GPU-
+accelerated badge, analysis, and unload all work, no torch package/binary
+in the bundle; full generation completion through the frozen worker on
+Linux and actual CUDA GPU offload remain pending on hardware this sandbox
+doesn't have; all unit tests/ruff/mypy green) — see the note near the end
+of Block 5, added 2026-09-22.
 
 ## Goal
 
@@ -903,6 +914,110 @@ and `memory_status.py` no longer imports `torch` at all (see its own
 end-of-block note). `--exclude-module torch` can now be applied to
 `scripts/build_worker_sidecar.sh` without the `/memory` crash risk
 described above; still not yet done or verified live in this block.
+
+**`--exclude-module torch` applied and live-verified on Linux (2026-09-22):**
+added to `scripts/build_worker_sidecar.sh`'s PyInstaller invocation, with a
+comment recording why it's safe (nothing on the app's runtime path imports
+torch; only `memory_status.py` did, and Block 4 removed that). Rebuilt via
+`scripts/linux_workspace.sh . scripts/build_worker_sidecar.sh` and confirmed
+directly against the frozen output: no `torch/` package directory and no
+`libtorch*.so` anywhere in the bundle (previously present, e.g.
+`torch/lib/libtorch_cpu.so`, per this block's own earlier note). A 2.3 MB
+`torch-2.14.0+cpu.dist-info` metadata-only directory remains - traced to
+`_pyinstaller_hooks_contrib`'s `hook-transformers.py`, which calls
+`copy_metadata()` on every dependency `transformers.dependency_versions_table`
+lists, independent of `--exclude-module`. Confirmed this is inert (no
+runtime code path reads it) rather than assumed: the frozen worker's own
+stderr printed `[transformers] PyTorch was not found. Models won't be
+available and only tokenizers, configuration and file/data utilities can be
+used.` during a real request and continued operating normally, matching this
+project's tokenizer-only use of `transformers`.
+Ran the frozen onedir worker (started via its own binary, not
+`cargo tauri dev`, since this sandbox has no Tauri shell) against the real,
+already-installed Llama 3.2 3B Instruct GGUF bundle from Block 8's own live
+verification: `POST /models/{id}/download` against already-verified files on
+disk completed near-instantly and flipped status to `installed` with no
+network access; `GET /memory` while the model was mid-load returned a valid,
+torch-free snapshot (`loading: true`, `loading_entry_id` set,
+`gpu_in_use: false`, no exception) - the exact endpoint this bullet's earlier
+note flagged as the one thing that would crash if torch were excluded before
+Block 4 landed; `POST /analyses` was accepted and the job reached `running`,
+with `worker_rss_bytes` climbing as the real GGUF file began loading.
+Full completion of that job (and therefore live GPU-offload/CPU-only
+generation confirmation on Linux) could not be reached in this sandbox: real
+GGUF loading at this catalog entry's `context_size=16384` was OOM-killed by
+the container's own memory ceiling before finishing (confirmed via
+`/sys/fs/cgroup/memory.events`'s `oom_kill` counter incrementing, not
+guessed) - this shared devcontainer already runs the IDE, language servers,
+and other agent tooling, leaving well under the ~8 GB `memory_tier` floor
+this same entry's own `compatible: false`/`compatibility_reasons` already
+and correctly reports for this device. Not a packaging regression: the
+identical model already completed real end-to-end generation in this
+project earlier (Block 2, Block 8) via the lighter, non-frozen dev venv
+path with less fixed overhead. Per this block's own Acceptance wording,
+this leaves Linux's full load-and-generate confirmation *through the frozen
+worker specifically* pending on adequate hardware, not implicitly passed;
+the packaging-specific risks this bullet exists to catch (binary discovery,
+torch exclusion breaking a live code path) are confirmed closed.
+Backend regression check after the script change: full suite
+(541 passed, 2 pre-existing skips), `ruff format --check`, `ruff check`, and
+`mypy` all green via `scripts/linux_workspace.sh backend uv run ...`
+(`test_worker_entrypoint.py`'s existing coverage included, unmodified, per
+this block's own Checks).
+
+**Confirmed live, no action needed: build toolchain and Metal/CUDA defaults
+(2026-09-22).** Checked `backend/uv.lock`: `llama-cpp-python==0.3.35` has no
+platform wheel on PyPI, only an sdist - every install (dev venv, isolated
+worker build) genuinely compiles it from source via CMake, exactly the case
+this bullet flagged as unverified. Confirmed the actual build requires only
+a C/C++ compiler: `cmake`/`ninja` are pulled automatically as PEP 517
+build-time dependencies (the `cmake` PyPI package bundles its own binary),
+confirmed by finding them staged under `uv`'s own build cache with no system
+`cmake`/`ninja` installed in this container at all. That compiler
+requirement is already covered by this README's existing Prerequisites
+(`build-essential` for Linux, Xcode Command Line Tools for macOS) - no new
+toolchain bullet needed. Read `ggml/CMakeLists.txt` from the resolved
+sdist directly rather than assuming: `option(GGML_METAL ... ${GGML_METAL_DEFAULT})`
+is on by default for Apple builds (matching this block's own already-live
+Metal confirmation on the user's Mac with no special build flags), while
+`option(GGML_CUDA ... OFF)` is off by default everywhere, Linux included.
+Concretely: this project's Linux build today produces a CPU-only
+`llama-cpp-python`, even on hardware with an NVIDIA GPU and the CUDA
+toolkit installed, unless a user manually sets
+`CMAKE_ARGS="-DGGML_CUDA=on"` before installing - undocumented, and
+untested here since this sandbox has no CUDA hardware to build or run
+against. Recording this as the honest current state rather than adding
+unverified CUDA build instructions: this project does not (yet) build
+CUDA support by default or document an opt-in path for it. CPU operation
+without CUDA installed is exactly what this session's Linux frozen-worker
+run above exercised (up to the container's own memory ceiling), and
+`llama_supports_gpu_offload()`-based downgrade-to-CPU (Block 3) already
+handles a CPU-only build gracefully. Actual CUDA GPU offload on Linux
+remains unverified for lack of matching hardware, same status this block's
+Acceptance already anticipates for missing target hardware.
+
+**macOS confirmed live by the user (2026-09-22), closing this block's
+remaining Mac-side gap:** rebuilt via `scripts/build_worker_sidecar.sh` then
+`scripts/build_macos_app.sh` (a real release `.app`, codesigned, not just
+`cargo tauri dev`) with `--exclude-module torch` in place. Loaded a real
+model, analyzed a real invoice, saw the Block 4 "GPU accelerated" badge with
+no error, and unloaded cleanly - all through the actual built app. Checked
+the bundle directly: no `torch/` package directory and no `libtorch*.dylib`
+anywhere under `Contents/Resources/worker` (`find ... -iname "libtorch*" -o
+-type d -iname "torch"` returned nothing); worker directory totals 195 MB.
+`transformers-`internal `.py` files that reference torch by name (e.g.
+`pytorch_utils.py`) and a small `torch-2.14.0.dist-info` metadata directory
+are still present - expected and inert, same mechanism already traced and
+explained in the Linux note above (`transformers`' own PyInstaller hook
+collects its source wholesale and copies dependency metadata independent of
+`--exclude-module`; nothing on the app's real code path imports it, and this
+live run is itself proof of that). This closes the "staged and run through
+`cargo tauri dev` on the target Mac" half of this block's Acceptance (via an
+even stronger real-release-build path) and the "all packaged workers must
+operate without torch installed" requirement for macOS. Still open:
+Linux's full load-and-generate confirmation through the frozen worker
+specifically (blocked on hardware, see above) and actual CUDA GPU offload
+on Linux (no hardware to test against).
 
 Acceptance: `scripts/build_worker_sidecar.sh` produces a worker that starts
 and loads a real GGUF model, staged and run through `cargo tauri dev` on

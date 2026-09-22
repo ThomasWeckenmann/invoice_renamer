@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 1.1.2 (2026-09-22, claude sonnet-5)
+
+- bugfix: Exclude torch from the packaged worker bundle now that /memory no longer needs it
+
+  PyInstaller's static analysis pulled torch in via transformers' Auto-class
+  hook even though nothing on the app's runtime path ever imports it.
+  Confirmed live on Linux: the frozen worker starts, installs a model, and
+  begins a real GGUF load with torch fully absent from the bundle.
+
 ## Version 1.1.1 (2026-09-22, claude sonnet-5)
 
 - bugfix: Restore the GPU-accelerated indicator in the memory status line, silently dead since the runtime switch to llama.cpp
