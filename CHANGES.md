@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 1.2.1 (2026-09-22, claude sonnet-5)
+
+- Correct extractor.py's docstring, which wrongly claimed extract_invoice() never raises
+
+  The first model.generate() call is deliberately left unguarded - unlike
+  callers investigated, pipeline.py and benchmark.py already wrap the whole
+  call with crash handling that preserves XML fields and classifies benchmark
+  failures, which catching it here would have broken. No behavior changed.
+
 ## Version 1.2.0 (2026-09-22, claude sonnet-5)
 
 - Make Granite the default model and refresh both model descriptions with the user's own benchmark comparison

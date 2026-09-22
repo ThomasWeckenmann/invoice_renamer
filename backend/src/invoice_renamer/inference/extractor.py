@@ -1,12 +1,24 @@
 """Orchestrates prompting, JSON parsing, Pydantic validation, and repair retries.
 
-Never raises on a bad model response: a response that still fails validation
+Never raises on a bad *response*: a response that still fails validation
 after the repair attempts become an all-null InvoiceExtraction carrying a
 warning, so a single bad extraction can't crash a batch run. A response with
 one invalid field among otherwise-good ones is salvaged instead of discarded
 whole (see _salvage()), but salvage still spends a repair attempt trying to
 get the dropped field back before settling for the partial result - it's a
 safety net under the retry loop, not a shortcut around it.
+
+The one exception is the very first model.generate() call, before the retry
+loop starts: it's deliberately left to raise. Every generate() call after it
+is guarded, because by then a salvaged_fallback may already exist and losing
+it to a crash would be strictly worse than keeping it - but nothing useful
+exists yet at the first call, and both real callers (analysis/pipeline.py,
+evaluation/benchmark.py) already wrap extract_invoice() with their own crash
+handling that does more than this module could: pipeline.py preserves
+XML-derived fields and skips the (also-crashing) shortening pass,
+benchmark.py classifies the invoice as failed and excludes it from timing
+averages. Catching it here too would just make both of those misclassify a
+crash as an empty-but-successful extraction.
 """
 
 import json
