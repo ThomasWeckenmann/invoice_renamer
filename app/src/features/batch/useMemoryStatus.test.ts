@@ -19,8 +19,7 @@ function snapshot(overrides: Partial<MemorySnapshot> = {}): MemorySnapshot {
     loaded_entry_id: null,
     loading: false,
     loading_entry_id: null,
-    gpu: null,
-    gpu_error: null,
+    gpu_in_use: false,
     ...overrides,
   };
 }

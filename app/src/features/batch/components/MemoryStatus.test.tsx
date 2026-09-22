@@ -1,6 +1,5 @@
 /** Tests for the persistent memory-status readout: model residency wording,
- * a failed GPU measurement shown explicitly rather than silently omitted,
- * per-stat tooltips, and RAM usage color coding. */
+ * the GPU-accelerated badge, per-stat tooltips, and RAM usage color coding. */
 
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
@@ -17,12 +16,11 @@ function snapshot(overrides: Partial<MemorySnapshot> = {}): MemorySnapshot {
     system_total_bytes: 16_000_000_000,
     system_available_bytes: 8_000_000_000,
     worker_rss_bytes: 1_000_000_000,
-    runtime_device: "mps",
+    runtime_device: "gpu",
     loaded_entry_id: null,
     loading: false,
     loading_entry_id: null,
-    gpu: null,
-    gpu_error: null,
+    gpu_in_use: false,
     ...overrides,
   };
 }
@@ -69,36 +67,16 @@ describe("MemoryStatus", () => {
     expect(screen.getByText("Measuring memory…")).toBeInTheDocument();
   });
 
-  it("shows the GPU reading when one is available", () => {
-    mockStatus({
-      snapshot: snapshot({
-        gpu: {
-          backend: "mps",
-          allocated_bytes: null,
-          reserved_bytes: null,
-          driver_allocated_bytes: 3_000_000_000,
-        },
-      }),
-    });
+  it("shows the GPU accelerated badge when the GPU is in use", () => {
+    mockStatus({ snapshot: snapshot({ gpu_in_use: true }) });
 
     render(<MemoryStatus models={MODELS} />);
 
-    expect(screen.getByText(/GPU \(Metal\)/)).toBeInTheDocument();
+    expect(screen.getByText("GPU accelerated")).toBeInTheDocument();
   });
 
-  it("shows GPU unavailable with the error in a tooltip when the GPU read failed", () => {
-    mockStatus({
-      snapshot: snapshot({ gpu: null, gpu_error: "backend rejected the query mid-unload" }),
-    });
-
-    render(<MemoryStatus models={MODELS} />);
-
-    const gpuItem = screen.getByText("GPU unavailable");
-    expect(gpuItem).toHaveAttribute("title", "backend rejected the query mid-unload");
-  });
-
-  it("omits the GPU line entirely when there is no GPU and no error", () => {
-    mockStatus({ snapshot: snapshot({ runtime_device: "cpu", gpu: null, gpu_error: null }) });
+  it("omits the GPU line entirely when the GPU is not in use", () => {
+    mockStatus({ snapshot: snapshot({ runtime_device: "cpu", gpu_in_use: false }) });
 
     render(<MemoryStatus models={MODELS} />);
 
@@ -169,16 +147,7 @@ describe("MemoryStatus", () => {
   });
 
   it("gives each stat an explanatory tooltip", () => {
-    mockStatus({
-      snapshot: snapshot({
-        gpu: {
-          backend: "cuda",
-          allocated_bytes: 2_000_000_000,
-          reserved_bytes: 2_500_000_000,
-          driver_allocated_bytes: null,
-        },
-      }),
-    });
+    mockStatus({ snapshot: snapshot({ gpu_in_use: true }) });
 
     render(<MemoryStatus models={MODELS} />);
 
@@ -190,25 +159,9 @@ describe("MemoryStatus", () => {
       "title",
       "Python process RAM — excludes the app window and shell.",
     );
-    expect(screen.getByText(/^GPU \(CUDA\)/)).toHaveAttribute(
+    expect(screen.getByText("GPU accelerated")).toHaveAttribute(
       "title",
-      "GPU tensors / reserved VRAM — reserved already includes tensors.",
-    );
-  });
-
-  it("appends the Apple Silicon shared-memory note only for an MPS GPU", () => {
-    mockStatus({
-      snapshot: snapshot({
-        gpu: { backend: "mps", allocated_bytes: null, reserved_bytes: null, driver_allocated_bytes: 1 },
-      }),
-    });
-
-    render(<MemoryStatus models={MODELS} />);
-
-    expect(screen.getByText(/^GPU \(Metal\)/)).toHaveAttribute(
-      "title",
-      "GPU allocations (shared RAM, incl. cache) — uses the Mac's shared memory pool. " +
-        "GPU memory shares system RAM; these figures are not additive.",
+      "Inference is GPU accelerated.",
     );
   });
 
@@ -217,14 +170,7 @@ describe("MemoryStatus", () => {
     // browser shows on hover - so a stale per-item tooltip here would hide
     // the outer "last measurement failed" title on that item permanently.
     mockStatus({
-      snapshot: snapshot({
-        gpu: {
-          backend: "cuda",
-          allocated_bytes: 2_000_000_000,
-          reserved_bytes: 2_500_000_000,
-          driver_allocated_bytes: null,
-        },
-      }),
+      snapshot: snapshot({ gpu_in_use: true }),
       stale: true,
       error: "worker unreachable",
     });
@@ -233,38 +179,7 @@ describe("MemoryStatus", () => {
 
     expect(screen.getByText(/^RAM/)).not.toHaveAttribute("title");
     expect(screen.getByText(/^Worker/)).not.toHaveAttribute("title");
-    expect(screen.getByText(/^GPU \(CUDA\)/)).not.toHaveAttribute("title");
-  });
-
-  it("an existing GPU error tooltip still takes priority over the static explanation", () => {
-    mockStatus({
-      snapshot: snapshot({ gpu: null, gpu_error: "backend rejected the query mid-unload" }),
-    });
-
-    render(<MemoryStatus models={MODELS} />);
-
-    expect(screen.getByText("GPU unavailable")).toHaveAttribute(
-      "title",
-      "backend rejected the query mid-unload",
-    );
-  });
-
-  it("keeps the GPU error tooltip even while the overall reading is stale", () => {
-    // Unlike the new static tooltips, gpu_error describes this specific
-    // snapshot's own failed GPU read, not the freshness of the latest poll -
-    // it must stay visible rather than deferring to the outer stale title.
-    mockStatus({
-      snapshot: snapshot({ gpu: null, gpu_error: "backend rejected the query mid-unload" }),
-      stale: true,
-      error: "worker unreachable",
-    });
-
-    render(<MemoryStatus models={MODELS} />);
-
-    expect(screen.getByText("GPU unavailable")).toHaveAttribute(
-      "title",
-      "backend rejected the query mid-unload",
-    );
+    expect(screen.getByText("GPU accelerated")).not.toHaveAttribute("title");
   });
 
   it("colors the RAM item critical when available memory is very low", () => {

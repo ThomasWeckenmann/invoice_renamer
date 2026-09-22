@@ -21,6 +21,10 @@ note added at the end of Block 1 (2026-09-22). Block 8 code complete
 (Qwen3-0.6B swapped for Llama 3.2 3B Instruct in the app catalog, live-
 verified end to end in this sandbox; not yet rebuilt into the worker
 sidecar or run through the real app) — see Block 8, added 2026-09-22.
+Block 4 code complete (`gpu_in_use: bool` replaces the dead torch-specific
+`GpuMemorySnapshot`/`gpu` shape; `memory_status.py` no longer imports torch
+at all; all unit tests/ruff/mypy/lint/build green) — see the note at the
+end of Block 4, added 2026-09-22.
 
 ## Goal
 
@@ -704,26 +708,45 @@ each test file's fake extractor gained a no-op `close()` method since
 
 ## Block 4: Memory status for the new runtime
 
-- Replace `_gpu_memory()`'s torch-specific branches
-  (`memory_status.py:55-83`) with whatever the llama.cpp binding actually
-  exposes for GPU memory — investigate what's queryable first; do not
-  assume a MPS/CUDA-equivalent allocator API exists. It may turn out worker
-  RSS (`_worker_rss()`, unaffected by this plan) becomes the *only*
-  reliable figure, since GGUF weights loaded via llama.cpp may not expose a
-  separate allocator context the way torch's CUDA/MPS caching allocators
-  do. If so, that's a real, user-facing capability loss to surface
-  honestly (a plainer memory readout), not to paper over by inventing a
-  number.
-- Update `GpuMemorySnapshot` (`memory_status.py:16-24`) to whatever shape
-  is actually measurable — this may mean fewer fields, not a like-for-like
-  swap of the existing `driver_allocated_bytes`/`allocated_bytes`/
-  `reserved_bytes` trio.
+**Root cause confirmed live (2026-09-22):** the GPU panel is currently
+dead, not just untuned. `_gpu_memory()` (`memory_status.py:55-83`) still
+branches on `device == "mps"` / `device == "cuda"`, but Block 3 already
+changed `select_device()` to return only `"cpu"`/`"gpu"` (llama.cpp exposes
+one offload flag, not per-backend strings) - neither branch has matched
+since Block 3 landed, so `gpu` is always `None` and `MemoryStatus.tsx`
+silently renders nothing for it (`gpu && (...)`, `MemoryStatus.tsx:145`).
+Confirmed against the user's own real `/memory` payload while a model was
+loaded: `"runtime_device": "gpu", "gpu": null, "gpu_error": null` - no
+exception, just a value nobody reads. Also confirmed live (same session,
+see Block 5's own note): Metal offload genuinely is active on the user's
+Mac (100% GPU utilization in Activity Monitor during inference, correlated
+with that same `runtime_device: "gpu"`), so this was never a sign offload
+itself was broken - only that its own status line went blind.
+
+- Investigated what llama.cpp/`llama-cpp-python` actually exposes for GPU
+  memory: no CUDA/MPS-caching-allocator-equivalent query exists the way
+  torch's does - ggml has no per-allocation byte counter surfaced through
+  the Python binding. Don't chase a byte figure that isn't really there.
+  Replace `_gpu_memory()`'s torch-specific branches with a plain
+  `gpu_in_use: bool` (or equivalent) derived from `runtime_device == "gpu"`
+  - the same confirmed-not-guessed signal `select_device()` already
+  produces via `llama_supports_gpu_offload()`. This is deliberately a
+  qualitative "GPU is being used" indicator, not a memory number - the
+  plainer readout this block's own text already anticipated as a possible
+  outcome, and per the user, an indicator on its own is a genuinely useful
+  status regardless of whether a byte figure ever becomes available.
+- Update `GpuMemorySnapshot` (`memory_status.py:16-24`) to the simpler
+  shape above - drop `allocated_bytes`/`reserved_bytes`/
+  `driver_allocated_bytes` entirely rather than leaving fields that can
+  never be populated for llama.cpp.
 - Update `MemoryStatus.tsx` to match: `GPU_BACKEND_LABELS`/`GPU_TOOLTIPS`
-  (lines 8-20), `describeGpu()` (lines 31-43), and the Apple Silicon shared-
-  memory disclaimer (lines 21-24, `APPLE_SILICON_SHARED_MEMORY_NOTE`) — the
-  disclaimer's premise (GPU and system RAM share one pool on Apple Silicon)
-  still holds for llama.cpp/Metal, but the specific reported figure it's
-  attached to may not exist anymore.
+  (lines 8-20) and `describeGpu()` (lines 31-43) collapse to a single
+  "GPU accelerated" badge/label when `gpu_in_use` is true, nothing when
+  false or absent. Keep the Apple Silicon shared-memory disclaimer (lines
+  21-24, `APPLE_SILICON_SHARED_MEMORY_NOTE`) - its premise (GPU and system
+  RAM share one pool, so worker RSS already includes GPU-resident weights)
+  still holds and is now the *only* memory figure available for a GPU-
+  accelerated load, which the disclaimer should say plainly.
 - Update `app/src/lib/api/types.ts`'s `GpuMemorySnapshot` interface and the
   three test fixtures that construct one
   (`useModelCatalog.test.ts:22`, `MemoryStatus.test.tsx:40`,
@@ -734,16 +757,58 @@ each test file's fake extractor gained a no-op `close()` method since
 Checks: extend `backend/tests/inference/test_memory_status.py` (which
 already independently injects each provider — `system_memory_fn`,
 `worker_rss_fn`, `gpu_memory_fn` — per its own module docstring) with the
-new GPU provider shape, including a failure-returns-partial-snapshot case
-matching the existing `test_gpu_provider_failure_returns_a_partial_snapshot_not_an_exception`.
-Frontend rendering tests for whatever the new `GpuMemorySnapshot` shape is,
-replacing (not just adding to) the mps/cuda/rocm-specific assertions tied
-to the old shape.
+new boolean GPU-in-use shape, including a failure-returns-partial-snapshot
+case matching the existing
+`test_gpu_provider_failure_returns_a_partial_snapshot_not_an_exception`.
+Frontend rendering tests for the new badge, replacing (not just adding to)
+the mps/cuda/rocm-specific assertions tied to the old shape.
 
-Acceptance: the memory status line shows real, live numbers during an
-actual model load on the target Mac — even if that number set is smaller
-than today's — with no stale field left rendering a torch-era number that
-llama.cpp doesn't actually produce.
+Acceptance: the memory status line shows, during an actual model load on
+the target Mac, a real "GPU accelerated" indicator when `runtime_device`
+is `"gpu"` and nothing when it's `"cpu"` - matched against what Activity
+Monitor's GPU History actually shows at the same moment, not just against
+`runtime_device`'s own value - with no stale torch-era field left in
+either the backend snapshot or the frontend.
+
+**Implemented (2026-09-22):** design simplified from this block's own
+draft during implementation, once it became clear there is nothing left to
+query per sample. `select_device()` (Block 3) already confirms GPU-offload
+support once, at load time, via `llama_supports_gpu_offload()`, and hands
+`memory_status.py` the result as `runtime_device` (`"cpu"`/`"gpu"`);
+re-querying the binding on every memory poll would only re-confirm the
+same build-wide, load-time-constant fact, not read any new state (unlike
+the old torch counters, which genuinely changed between polls). So
+`gpu_in_use` is a pure `runtime_device == "gpu"` expression inside
+`sample_memory()` itself - no injectable GPU provider, no `gpu_error`, and
+no `_gpu_memory()` helper survive; `MemorySnapshot.gpu_in_use: bool`
+replaces the `gpu`/`gpu_error` fields directly (not a simplified nested
+`GpuMemorySnapshot`, since a wrapper object holding one field that's
+always `true` when present carries no information beyond its own
+presence). This also incidentally closes the gap Block 5's note flagged:
+`memory_status.py` no longer imports `torch` at all, lazily or otherwise,
+so excluding torch from the packaged worker (Block 5's own remaining
+`--exclude-module torch` step) is now safe to do against `/memory` too.
+`app/src/lib/api/types.ts`'s `GpuMemorySnapshot` interface is removed the
+same way, not simplified in place. `MemoryStatus.tsx` collapses to a
+single "GPU accelerated" badge with a static tooltip; the old stale-vs-live
+tooltip-priority logic existed only to keep a live `gpu_error` visible
+through staleness and was deleted along with `gpu_error` itself. All three
+frontend fixtures named in this block (`useModelCatalog.test.ts`,
+`MemoryStatus.test.tsx`, `ModelSelector.test.tsx`) were checked - only
+`MemoryStatus.test.tsx` actually constructed the old `gpu`/`gpu_error`
+shape and was rewritten; the other two only set `prompt_template` on an
+unrelated type, confirmed to carry no leftover GPU-shape assumption.
+Live-verified on the user's Mac: the badge renders correctly during a real
+model load. **Correction (2026-09-22, external review via codex):** the
+tooltip's first version stated "GPU memory shares system RAM; the Worker
+figure above already includes it," carried over from the old
+Apple-Silicon-only disclaimer this block's draft said to keep - but since
+the backend can no longer distinguish Metal's unified memory from a
+discrete GPU's own VRAM (see above), that claim is simply false on a
+discrete-GPU host (e.g. CUDA on Linux), where Worker RSS does *not*
+include GPU memory. Simplified to "Inference is GPU accelerated." with no
+memory-sharing claim at all, rather than trying to re-gate it on a backend
+distinction that no longer exists.
 
 ## Block 5: Dependencies and packaging
 
@@ -805,6 +870,15 @@ back through the full FastAPI app - the same code path the real Tauri app
 uses. This closes this bullet's Linux half; still needs macOS confirmation
 by the user (Metal-enabled llama-cpp-python wheel, real `cargo tauri dev`).
 
+**macOS Metal offload confirmed live (2026-09-22):** the user ran a real
+`cargo tauri dev` build on their Mac with Llama 3.2 3B Instruct loaded and
+observed Activity Monitor's GPU History spike to 100% during inference,
+and independently pulled the worker's own raw `GET /memory` response
+showing `"runtime_device": "gpu"` - `select_device()`'s
+`llama_supports_gpu_offload()` check (`runtime.py:31-34`) is confirmed
+true for the installed macOS wheel, not just assumed. This closes this
+bullet's macOS half too.
+
 Also found live, not yet fixed: `torch` is still fully bundled in the
 worker (confirmed present, e.g. `torch/lib/libtorch_cpu.so`) even though
 nothing in the app's actual runtime path needs it - proven by running the
@@ -817,12 +891,18 @@ that's never actually reached by this app's tokenizer-only path, but is
 still statically visible to PyInstaller. `--exclude-module torch` would
 almost certainly fix this and shrink the bundle substantially, but is not
 yet applied: `inference/memory_status.py`'s `_gpu_memory()` (Block 4, not
-done) still does a lazy `import torch` whenever `runtime_device != "cpu"` -
-on the user's Mac, `select_device()` will very likely return `"gpu"`
-(Metal-enabled builds are the default there), so hitting `/memory` while a
-model is loaded would crash with `ModuleNotFoundError` if torch were
-excluded now. Excluding torch from packaging should wait for Block 4's own
-torch removal from `memory_status.py`, not be done ahead of it.
+done at the time this was written) still did a lazy `import torch`
+whenever `runtime_device != "cpu"` - on the user's Mac, `select_device()`
+will very likely return `"gpu"` (Metal-enabled builds are the default
+there), so hitting `/memory` while a model is loaded would crash with
+`ModuleNotFoundError` if torch were excluded now. Excluding torch from
+packaging should wait for Block 4's own torch removal from
+`memory_status.py`, not be done ahead of it.
+**Update (2026-09-22): this blocker is now closed** - Block 4 is complete
+and `memory_status.py` no longer imports `torch` at all (see its own
+end-of-block note). `--exclude-module torch` can now be applied to
+`scripts/build_worker_sidecar.sh` without the `/memory` crash risk
+described above; still not yet done or verified live in this block.
 
 Acceptance: `scripts/build_worker_sidecar.sh` produces a worker that starts
 and loads a real GGUF model, staged and run through `cargo tauri dev` on
@@ -999,6 +1079,29 @@ was not rebuilt as part of this block. No entry added to
 is not a substitute for the documented, repeatable 5-invoice comparison the
 other two models have; a real benchmark entry is a tracked follow-up, not
 required to close this block.
+
+**Live memory comparison against Ollama (2026-09-22):** the user asked why
+the packaged app's worker process shows real memory (Activity Monitor)
+noticeably higher than Ollama running the same base model. Quantified, not
+just theorized: the `_temp` note's own earlier real `ollama ps` output for
+`llama3.2` reported `SIZE 2.8 GB` at `CONTEXT 4096`; the app worker's real
+`/memory` payload (same session as Block 5's Metal-offload confirmation)
+reported `worker_rss_bytes` ≈ 4.04 GB with this entry's `context_size=16384`
+loaded. The ~1.2 GB gap lines up closely with this entry's own measured
+KV-cache scaling (see `context_size=16384`'s comment in
+`models/gguf_catalog.py`): ~448 MiB KV cache at `n_ctx=4096` vs. ~1792 MiB
+at `n_ctx=16384`, a ~1.3 GB delta from context size alone - closely
+matching the observed gap. Remaining Python/FastAPI/`transformers`-tokenizer
+process overhead (vs. Ollama's Go+C++ runtime) plausibly accounts for the
+small remainder, not separately measured. This is the expected, deliberate
+cost of the `context_size=16384` decision (made to fix the real
+prompt-exceeds-context failure this same day - see the note at the end of
+Block 1), not a memory leak or a sign GPU offload is misbehaving.
+**By explicit user decision, `context_size` is not being changed now** -
+recorded here so a future memory investigation doesn't have to re-derive
+this; a smaller `context_size` (e.g. 8192) remains an available, understood
+trade-off (less headroom for a very large invoice, closer to Ollama's
+footprint) if raised again later.
 
 ## Verification and implementation bookkeeping
 

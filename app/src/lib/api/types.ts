@@ -120,13 +120,6 @@ export interface SystemCapabilities {
   free_disk_gb: number;
 }
 
-export interface GpuMemorySnapshot {
-  backend: string;
-  allocated_bytes: number | null;
-  reserved_bytes: number | null;
-  driver_allocated_bytes: number | null;
-}
-
 export interface MemorySnapshot {
   sampled_at: number;
   system_total_bytes: number;
@@ -136,6 +129,7 @@ export interface MemorySnapshot {
   loaded_entry_id: string | null;
   loading: boolean;
   loading_entry_id: string | null;
-  gpu: GpuMemorySnapshot | null;
-  gpu_error: string | null;
+  // Qualitative only - llama.cpp exposes no per-allocation byte counter the
+  // way the previous torch-based runtime's CUDA/MPS readings did.
+  gpu_in_use: boolean;
 }

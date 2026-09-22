@@ -1,7 +1,8 @@
-"""Live memory sampling: system, worker-process, and (only once an
-accelerator is actually initialized by a loaded model) GPU counters. Every
-provider is independently injectable so tests can simulate CPU/MPS/CUDA/ROCm
-hosts and partial failures without touching real hardware.
+"""Live memory sampling: system, worker-process, and a qualitative
+GPU-in-use flag. System/worker readings are independently injectable so
+tests can simulate different hosts without touching real hardware; GPU use
+is derived directly from the already-confirmed runtime device rather than
+queried live.
 """
 
 from __future__ import annotations
@@ -11,17 +12,6 @@ from collections.abc import Callable
 
 import psutil
 from pydantic import BaseModel
-
-
-class GpuMemorySnapshot(BaseModel):
-    backend: str  # "mps", "cuda", or "rocm"
-    # Populated for CUDA/ROCm; left None for MPS, which exposes no separate
-    # reserved-vs-allocated split.
-    allocated_bytes: int | None = None
-    reserved_bytes: int | None = None
-    # Populated for MPS only: the Metal driver's total allocation, including
-    # its internal caches - not directly comparable to CUDA's allocated_bytes.
-    driver_allocated_bytes: int | None = None
 
 
 class MemorySnapshot(BaseModel):
@@ -38,9 +28,11 @@ class MemorySnapshot(BaseModel):
     # switch) - distinct from "nothing loaded" and "something loaded".
     loading: bool = False
     loading_entry_id: str | None = None
-    gpu: GpuMemorySnapshot | None
-    # Set when a GPU provider raised, without failing the rest of the snapshot.
-    gpu_error: str | None = None
+    # True once a model is loaded onto the GPU (runtime_device == "gpu").
+    # llama.cpp exposes one build-wide offload flag, not a per-allocation
+    # byte counter the way torch's CUDA/MPS backends did, so this is a
+    # qualitative "GPU is being used" signal rather than a memory figure.
+    gpu_in_use: bool = False
 
 
 def _system_memory() -> tuple[int, int]:
@@ -52,37 +44,6 @@ def _worker_rss() -> int:
     return psutil.Process().memory_info().rss
 
 
-def _gpu_memory(device: str) -> tuple[GpuMemorySnapshot | None, str | None]:
-    """Only ever called for a device a model has already loaded onto - never
-    probes or initializes an accelerator that's merely detected as present."""
-    import torch
-
-    if device == "mps":
-        if not torch.backends.mps.is_available():
-            return None, None
-        return (
-            GpuMemorySnapshot(
-                backend="mps", driver_allocated_bytes=torch.mps.driver_allocated_memory()
-            ),
-            None,
-        )
-    if device == "cuda":
-        if not torch.cuda.is_available():
-            return None, None
-        # A ROCm-enabled torch build reports itself through torch.version.hip
-        # while still using the torch.cuda namespace (see runtime.py).
-        backend = "rocm" if getattr(torch.version, "hip", None) else "cuda"
-        return (
-            GpuMemorySnapshot(
-                backend=backend,
-                allocated_bytes=torch.cuda.memory_allocated(),
-                reserved_bytes=torch.cuda.memory_reserved(),
-            ),
-            None,
-        )
-    return None, None
-
-
 def sample_memory(
     *,
     runtime_device: str | None,
@@ -91,20 +52,9 @@ def sample_memory(
     loading_entry_id: str | None = None,
     system_memory_fn: Callable[[], tuple[int, int]] = _system_memory,
     worker_rss_fn: Callable[[], int] = _worker_rss,
-    gpu_memory_fn: Callable[[str], tuple[GpuMemorySnapshot | None, str | None]] = _gpu_memory,
 ) -> MemorySnapshot:
     system_total, system_available = system_memory_fn()
     worker_rss = worker_rss_fn()
-
-    gpu: GpuMemorySnapshot | None = None
-    gpu_error: str | None = None
-    if runtime_device is not None and runtime_device != "cpu":
-        try:
-            gpu, gpu_error = gpu_memory_fn(runtime_device)
-        except Exception as exc:
-            # A provider failing (e.g. a backend rejecting a query mid-unload)
-            # must not take down the rest of an otherwise-good snapshot.
-            gpu, gpu_error = None, str(exc)
 
     return MemorySnapshot(
         sampled_at=time.time(),
@@ -115,6 +65,5 @@ def sample_memory(
         loaded_entry_id=loaded_entry_id,
         loading=loading,
         loading_entry_id=loading_entry_id,
-        gpu=gpu,
-        gpu_error=gpu_error,
+        gpu_in_use=runtime_device == "gpu",
     )

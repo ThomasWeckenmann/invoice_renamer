@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 1.1.1 (2026-09-22, claude sonnet-5)
+
+- bugfix: Restore the GPU-accelerated indicator in the memory status line, silently dead since the runtime switch to llama.cpp
+
+  select_device()'s move to a plain cpu/gpu string broke the old
+  torch-specific MPS/CUDA readout without erroring - it just went silent.
+  Replaced with a 'GPU accelerated' badge driven directly by that string,
+  since llama.cpp exposes no per-allocation byte counter to show instead.
+
 ## Version 1.1.0 (2026-09-22, claude sonnet-5)
 
 - Swap the app's Qwen3-0.6B model for Llama 3.2 3B Instruct, and size each GGUF model's context window from real measurement instead of a shared placeholder

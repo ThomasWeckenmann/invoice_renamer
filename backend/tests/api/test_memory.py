@@ -97,8 +97,7 @@ def test_shape_before_any_model_has_loaded(client: TestClient) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["runtime_device"] is None
-    assert body["gpu"] is None
-    assert body["gpu_error"] is None
+    assert body["gpu_in_use"] is False
     assert body["system_total_bytes"] > 0
     assert body["worker_rss_bytes"] > 0
     assert body["sampled_at"] > 0
@@ -133,8 +132,7 @@ def test_reports_the_runtime_device_once_a_model_has_loaded(
 
     body = client.get("/memory", headers=_auth_headers()).json()
     assert body["runtime_device"] == "cpu"
-    # No GPU on a CPU device: absent, not a measured zero.
-    assert body["gpu"] is None
+    assert body["gpu_in_use"] is False
     assert body["loaded_entry_id"] == _MODEL_A
     assert body["loading"] is False
 
