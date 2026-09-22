@@ -21,7 +21,7 @@ export function BatchWorkspace() {
   const [importError, setImportError] = useState<string | null>(null);
   // Global, not per-item: read fresh at the moment each analyze/re-run fires,
   // so toggling it and re-running an item picks up the new value immediately.
-  const [shortenFields, setShortenFields] = useState(true);
+  const [shortenFields, setShortenFields] = useState(false);
   const [compactView, setCompactView] = useState(true);
   const [issuesOnly, setIssuesOnly] = useState(false);
   const [modelsCollapsed, setModelsCollapsed] = useState(false);
@@ -35,20 +35,20 @@ export function BatchWorkspace() {
   const rename = useRenameTransaction();
   const unloadTracking = useUnloadAfterBatch();
 
-  // Llama 3.2 is the default pick when it's already installed, so a
+  // Granite is the default pick when it's already installed, so a
   // returning user doesn't have to reselect a model every launch.
   useEffect(() => {
     if (selectedModelId !== null) {
       return;
     }
-    const llama = catalog.models.find(
+    const granite = catalog.models.find(
       (model) =>
-        model.entry.id.toLowerCase().includes("llama") &&
+        model.entry.id.toLowerCase().includes("granite") &&
         model.status === "installed" &&
         model.compatible,
     );
-    if (llama) {
-      setSelectedModelId(llama.entry.id);
+    if (granite) {
+      setSelectedModelId(granite.entry.id);
     }
   }, [catalog.models, selectedModelId]);
 

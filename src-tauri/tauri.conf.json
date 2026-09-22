@@ -15,7 +15,8 @@
         "label": "main",
         "title": "Invoice Renamer",
         "width": 1200,
-        "height": 950
+        "height": 950,
+        "minWidth": 1200
       }
     ]
   },

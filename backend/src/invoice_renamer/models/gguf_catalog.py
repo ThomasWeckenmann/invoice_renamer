@@ -17,8 +17,8 @@ its tokenizer files are pinned to Unsloth AI's ungated full-precision
 mirror instead - see that entry's own comments. Granite's description is
 carried over from catalog_data.py's own benchmark-backed text (GGUF
 quantization itself hasn't been separately benchmarked). Llama 3.2's
-description is a plain, unbenchmarked statement instead of a comparative
-claim - it has no entry in docs/model_benchmark_findings.md yet.
+description reflects the user's own side-by-side comparison of the two GGUF
+entries (Granite ahead); not yet written up in docs/model_benchmark_findings.md.
 """
 
 from invoice_renamer.models.catalog import MemoryTier, ModelCatalogEntry, ModelFile
@@ -43,9 +43,7 @@ GRANITE_3_3_2B_INSTRUCT_GGUF = ModelCatalogEntry(
     # larger invoice plus a JSON-repair round (which resends the original
     # prompt once, not twice - see build_repair_prompt in prompts.py).
     context_size=16384,
-    description=(
-        "Better extraction accuracy in our benchmarks, but slower inference and higher memory use"
-    ),
+    description="Better extraction accuracy in our benchmarks",
     files=[
         ModelFile(
             path="granite-3.3-2b-instruct-Q4_K_M.gguf",
@@ -123,7 +121,7 @@ LLAMA_3_2_3B_INSTRUCT_GGUF = ModelCatalogEntry(
     # 128), well inside this entry's 8 GB memory_tier floor alongside the
     # ~1.9 GB Q4_K_M weights. See the Granite entry above for why 16384.
     context_size=16384,
-    description="Alternative instruction-tuned model; not yet in docs/model_benchmark_findings.md",
+    description="Alternative instruction-tuned model. Lower benchmarks. Experimental.",
     files=[
         ModelFile(
             path="Llama-3.2-3B-Instruct-Q4_K_M.gguf",

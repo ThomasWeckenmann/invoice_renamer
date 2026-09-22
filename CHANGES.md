@@ -1,5 +1,11 @@
 # Changelog
 
+## Version 1.2.0 (2026-09-22, claude sonnet-5)
+
+- Make Granite the default model and refresh both model descriptions with the user's own benchmark comparison
+- Turn 'Shorten Names' off by default on startup
+- bugfix: stop the window from shrinking narrower than its launch width, which squeezed the toolbar's buttons until they disappeared
+
 ## Version 1.1.2 (2026-09-22, claude sonnet-5)
 
 - bugfix: Exclude torch from the packaged worker bundle now that /memory no longer needs it
