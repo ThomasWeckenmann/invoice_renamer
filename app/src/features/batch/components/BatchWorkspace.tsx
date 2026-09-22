@@ -35,18 +35,20 @@ export function BatchWorkspace() {
   const rename = useRenameTransaction();
   const unloadTracking = useUnloadAfterBatch();
 
-  // Qwen is the default pick when it's already installed, so a returning
-  // user doesn't have to reselect a model every launch.
+  // Llama 3.2 is the default pick when it's already installed, so a
+  // returning user doesn't have to reselect a model every launch.
   useEffect(() => {
     if (selectedModelId !== null) {
       return;
     }
-    const qwen = catalog.models.find(
+    const llama = catalog.models.find(
       (model) =>
-        model.entry.id.toLowerCase().includes("qwen") && model.status === "installed" && model.compatible,
+        model.entry.id.toLowerCase().includes("llama") &&
+        model.status === "installed" &&
+        model.compatible,
     );
-    if (qwen) {
-      setSelectedModelId(qwen.entry.id);
+    if (llama) {
+      setSelectedModelId(llama.entry.id);
     }
   }, [catalog.models, selectedModelId]);
 

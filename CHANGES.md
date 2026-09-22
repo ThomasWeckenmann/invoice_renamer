@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 1.1.0 (2026-09-22, claude sonnet-5)
+
+- Swap the app's Qwen3-0.6B model for Llama 3.2 3B Instruct, and size each GGUF model's context window from real measurement instead of a shared placeholder
+
+  Qwen's accuracy wasn't holding up under the new llama.cpp runtime, and
+  the runtime swap alone already roughly halved larger-model inference
+  time (Granite: 22.3s to 10.8s per invoice) - so a bigger, more accurate
+  model no longer costs what it used to.
+
 ## Version 1.0.0 (2026-09-21, claude sonnet-5)
 
 - Switch the app's local model runtime from Transformers/PyTorch to llama.cpp

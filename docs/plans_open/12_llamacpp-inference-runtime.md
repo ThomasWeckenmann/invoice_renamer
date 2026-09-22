@@ -14,7 +14,13 @@ per-file source overrides, all unit tests/ruff/mypy green) — see the note
 at the end of Block 2. Block 3 code complete (`ModelRuntime`,
 `select_device()`, and the app pipeline's `provider` literal swapped to
 llama.cpp; all unit tests/ruff/mypy green) — see the note at the end of
-Block 3.
+Block 3. `n_ctx` moved from a shared `4096` placeholder to a real,
+measured per-model `context_size` (both GGUF entries now `16384`), done
+ahead of Block 6 after the user hit the placeholder's limit live — see the
+note added at the end of Block 1 (2026-09-22). Block 8 code complete
+(Qwen3-0.6B swapped for Llama 3.2 3B Instruct in the app catalog, live-
+verified end to end in this sandbox; not yet rebuilt into the worker
+sidecar or run through the real app) — see Block 8, added 2026-09-22.
 
 ## Goal
 
@@ -200,6 +206,12 @@ downloading multi-GB files in CI.
   This plan is a runtime swap, not a model re-selection. Llama3.2 and any
   other new candidate stays out of scope; the `_temp` note treats
   evaluating it as a separate next step, not part of "rework the runtime".
+  **Revised 2026-09-22 (see Block 8):** the user independently evaluated
+  Llama 3.2 3B Instruct's accuracy (outside this repo, in Jupyter) and
+  decided to swap it in for Qwen3-0.6B. This is now a model re-selection
+  for one of the two slots, done after the runtime swap itself (Blocks
+  1-3) was already complete and live-verified - not a reversal of "ship a
+  single llama.cpp runtime," just of "no new model added."
   Use an existing, reputable GGUF conversion of Granite-3.3-2B-Instruct and
   Qwen3-0.6B if one exists and its provenance/license checks out (matching
   `catalog_data.py`'s existing standard of pinning real, re-verifiable
@@ -449,6 +461,40 @@ extraction prompt) - the chosen `n_ctx` is still not a measured-for-Granite's-
 real-prompts figure, and the empty-completion diagnostic's raw-text gap
 (previous paragraph) is unrelated to real weights and remains open
 regardless.
+
+**n_ctx moved from a shared placeholder to a real per-model catalog value
+(2026-09-22):** the user hit `Prompt (3671 tokens) + max_new_tokens (512)
+exceeds context window (4096)` on a real invoice during live testing -
+`load_installed()`'s hardcoded `n_ctx=4096` default was never sized to
+either model's real capability. `ModelCatalogEntry` gained an optional
+`context_size` field (`models/catalog.py`); `load_installed()` now defaults
+`n_ctx` to `entry.context_size` and raises clearly if a catalog entry has
+none set, instead of silently reusing one shared number across models (the
+explicit `n_ctx=` parameter still exists, for standalone validation only).
+Both GGUF entries in `models/gguf_catalog.py` are now set to
+`context_size=16384`. This was measured, not guessed: loaded both real
+Q4_K_M GGUF files already available in this sandbox from Block 2's live
+verification, at several `n_ctx` values, and read the KV-cache size
+directly from llama.cpp's own load log rather than trusting a theoretical
+estimate - confirmed linear scaling with `n_ctx` (Qwen: 448 MiB at 4096 ->
+~1.75 GiB at 16384; Granite: 320 MiB at 4096 -> ~1.25 GiB at 16384),
+comfortably inside both entries' 8 GB `memory_tier` floor alongside their
+own weights. 16384 was chosen over a smaller bump because
+`build_repair_prompt` (`prompts.py`) resends the full original prompt once
+per repair round (not twice - confirmed by reading it, not assumed), so a
+repair round on the user's own 3671-token prompt would already need
+roughly 3671 + response + error text + a fresh 512-token allowance - close
+enough to the old 4096 ceiling to fail too. Re-verified live end to end
+after the change: loaded the real Qwen3 GGUF through the unmodified
+`load_installed()` (no `n_ctx` override) and confirmed it resolves
+`n_ctx=16384` from the catalog entry and produces a real completion.
+`models/compatibility.py`'s tier minimums are unchanged, per the existing
+product decision above - the added KV-cache RAM was checked against the
+current 8 GB floor, not used to justify retuning it now. Not re-verified
+against Granite's real extraction prompts specifically (still the same gap
+noted in the paragraph above), and not yet validated against a real large
+multi-page invoice on the user's own Mac - only against the one real
+prompt length reported and against this sandbox's synthetic fixtures.
 
 ## Block 2: GGUF catalog entries for Granite-3.3-2B-Instruct and Qwen3-0.6B
 
@@ -856,6 +902,103 @@ done.
 Acceptance: every item above is either confirmed safe with a cited
 reference to the actual code, or has a tracked follow-up if something
 genuinely can't be closed out in this plan.
+
+## Block 8: Swap Qwen3-0.6B for Llama 3.2 3B Instruct
+
+Added 2026-09-22, after Blocks 1-3 were already complete and live-verified.
+Per the revised product decision above, this replaces one of the two GGUF
+catalog entries; it does not touch the runtime/lifecycle work Blocks 1-3
+already finished. The user independently evaluated Llama 3.2 3B Instruct's
+extraction accuracy in Jupyter (outside this repo) and decided to proceed
+before any formal entry exists in `docs/model_benchmark_findings.md`.
+
+- Verified live against the real Hugging Face API (not assumed): Meta
+  publishes no first-party GGUF for Llama 3.2 3B Instruct, and the real
+  base-model repository (`meta-llama/Llama-3.2-3B-Instruct`) is a **gated**
+  repository (`gated: "manual"`) requiring an accepted license and an HF
+  auth token this app's installer doesn't support. `unsloth/Llama-3.2-3B-
+  Instruct-GGUF` (213k+ downloads, the same verified HF org already trusted
+  for Qwen3's GGUF) is ungated and was used for the GGUF weights.
+  Unsloth also publishes an ungated full-precision mirror of the base model
+  (`unsloth/Llama-3.2-3B-Instruct`) that ships real tokenizer/template
+  files - used for the tokenizer `ModelFile` overrides instead of the
+  gated Meta repository, avoiding the auth problem entirely rather than
+  building new auth support into the installer.
+- Both the GGUF file's sha256 and the tokenizer file set's sha256s were
+  independently verified by downloading each real file and re-hashing it
+  locally (not trusting the HF API's reported LFS hash alone), matching
+  Block 2's own standard. Llama 3's tokenizer needs only `tokenizer.json`,
+  `tokenizer_config.json`, and `special_tokens_map.json` - no
+  `merges.txt`/`vocab.json` the way Qwen/Granite's GPT2-style tokenizers
+  need - confirmed empirically by loading `AutoTokenizer` with exactly that
+  file set and nothing else, not assumed from the architecture.
+- Added `"llama3"` to `LlamaCppExtractor`'s `_SUPPORTED_PROMPT_TEMPLATES`
+  allowlist. Unlike Qwen3, Llama 3.2's chat template has no hidden
+  thinking-mode toggle to suppress - confirmed live: loaded the real GGUF
+  through the unmodified `load_installed()`/`generate()` path (no code
+  changes beyond the allowlist entry), confirmed the rendered prompt starts
+  with the tokenizer's own `<|begin_of_text|>` BOS marker (so this
+  backend's existing `already_has_bos` duplicate-BOS guard applies
+  correctly here too, not just for Qwen/Granite), and got a clean, complete
+  generation with no leaked control tokens and no `finish_reason ==
+  "length"` diagnostic.
+- `context_size=16384`, measured the same way as the other two entries:
+  llama.cpp's own load log reported 1792 MiB of KV cache at `n_ctx=16384`
+  for the real GGUF file - exactly matching Qwen3's per-token KV cost
+  (both models: 28 layers, 8 kv heads, head_dim 128), comfortably inside
+  the entry's 8 GB `memory_tier` floor alongside the ~1.9 GB Q4_K_M
+  weights (larger than Qwen's ~400 MB, since this is a 3B model, not the
+  0.6B model it replaces).
+- License is the Llama 3.2 Community License, not Apache 2.0 like the
+  other entry - recorded accurately in the catalog rather than reused from
+  the entry it replaced. This app downloads the model directly to the
+  user's own machine (not bundled or redistributed by this project) and
+  doesn't fine-tune or rebrand it, which is consistent with a plain-use
+  reading of that license, but a legal read of the license's own terms
+  (attribution/naming restrictions, the >700M MAU clause) wasn't done here
+  and is worth the user's own confirmation before wider distribution.
+- Removed `QWEN3_0_6B_GGUF` from `models/gguf_catalog.py` and
+  `SHORTLISTED_CATALOG`. Left `catalog_data.py`'s legacy Transformers
+  `QWEN3_0_6B` entry untouched, per the existing product decision that the
+  benchmark CLI's catalog is out of scope for this plan.
+- Updated the one place the app hardcoded a Qwen-specific default:
+  `BatchWorkspace.tsx`'s auto-select-on-launch heuristic matched on an
+  installed model id containing `"qwen"`; now matches `"llama"`. No other
+  production code referenced the old model id - the remaining
+  `"qwen3-0.6b"` occurrences left unchanged are either the unrelated legacy
+  Transformers catalog, historical comments in `extractor.py`/`prompts.py`
+  documenting real past observations that don't depend on which model
+  ships today, or frontend test fixtures using it as an arbitrary
+  placeholder string unrelated to the real catalog.
+- Updated `README.md`'s model list and license text; removed the old
+  Qwen-vs-Granite timing comparison instead of re-asserting it for a
+  different model with no measured numbers to back it.
+
+Checks: `tests/models/test_gguf_catalog.py`'s existing structural checks
+(unique ids, pinned commit revisions, real sha256s, exactly one GGUF file,
+required tokenizer assets present, tokenizer source distinct from the
+GGUF's own, 8 GB compatibility floor) all run generically over
+`SHORTLISTED_CATALOG` and needed no changes to cover the new entry.
+`test_llamacpp_extractor.py`'s prompt-template-allowlist parametrization
+extended to cover `"llama3"`. Full backend suite (545 passed, 2 pre-existing
+skips), `ruff format --check`, `ruff check`, and `mypy` all green. Frontend
+`npm run lint`, `npm run test` (123 passed), and `npm run build` all green.
+
+Acceptance: real end-to-end generation confirmed live in this sandbox
+(model load through `LlamaCppExtractor.load_installed()`, template
+rendering, `generate()`) against the actual downloaded GGUF and tokenizer
+files - not yet re-confirmed through the full `AnalysisCoordinator` →
+`ModelRuntime` path or the packaged Tauri app on the user's own Mac (Block
+3's own wiring is already generic over catalog entries and unit-tested, so
+this is expected to work, but hasn't been watched happen end-to-end through
+the real app). The worker sidecar must be rebuilt
+(`scripts/build_worker_sidecar.sh` / `cargo tauri dev`, per `AGENTS.md`'s
+Linux build isolation section on Linux) before this is visible there - it
+was not rebuilt as part of this block. No entry added to
+`docs/model_benchmark_findings.md` yet - the user's Jupyter accuracy check
+is not a substitute for the documented, repeatable 5-invoice comparison the
+other two models have; a real benchmark entry is a tracked follow-up, not
+required to close this block.
 
 ## Verification and implementation bookkeeping
 

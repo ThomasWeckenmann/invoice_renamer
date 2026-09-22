@@ -52,6 +52,11 @@ class ModelCatalogEntry(BaseModel):
     files: list[ModelFile] = Field(min_length=1)
     memory_tier: MemoryTier
     prompt_template: str | None = None
+    # llama.cpp context window (n_ctx): max prompt+generation tokens this
+    # entry can process in one call. Unused by legacy Transformers entries
+    # (left None). Required for any entry loaded via
+    # LlamaCppExtractor.load_installed() - see that method's own validation.
+    context_size: int | None = None
     # Short, user-facing qualitative comparison (speed/memory/accuracy
     # tradeoff), backed by docs/model_benchmark_findings.md - not a claim
     # every larger model must outperform every smaller one.

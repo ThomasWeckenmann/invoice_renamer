@@ -8,12 +8,17 @@ against the repository before bumping a revision. Each entry's GGUF file
 and its tokenizer/chat-template files are pinned to two separate sources
 (see ModelFile.repository/revision in catalog.py): no existing GGUF release
 for either model also ships the tokenizer/template assets
-transformers.AutoTokenizer needs, so the tokenizer files are pinned to the
-same base-model repository/revision already used by that model's
-Transformers entry in catalog_data.py. The one exception to "not invented"
-is description, a short qualitative comparison carried over from
-catalog_data.py's own benchmark-backed text rather than repository
-metadata - GGUF quantization hasn't been separately benchmarked yet.
+transformers.AutoTokenizer needs. For Granite, the tokenizer files are
+pinned to the same base-model repository/revision already used by that
+model's Transformers entry in catalog_data.py. Llama 3.2's real base-model
+repository (meta-llama/Llama-3.2-3B-Instruct) is gated and needs an
+accepted license + HF auth token this app's installer doesn't support, so
+its tokenizer files are pinned to Unsloth AI's ungated full-precision
+mirror instead - see that entry's own comments. Granite's description is
+carried over from catalog_data.py's own benchmark-backed text (GGUF
+quantization itself hasn't been separately benchmarked). Llama 3.2's
+description is a plain, unbenchmarked statement instead of a comparative
+claim - it has no entry in docs/model_benchmark_findings.md yet.
 """
 
 from invoice_renamer.models.catalog import MemoryTier, ModelCatalogEntry, ModelFile
@@ -28,6 +33,16 @@ GRANITE_3_3_2B_INSTRUCT_GGUF = ModelCatalogEntry(
     revision="7cdf86ccd1f1bb3491c9b7017b033f2e51367397",
     memory_tier=MemoryTier.SMALL,
     prompt_template="granite-instruct",
+    # 16384 (native support: 131072). KV cache cost measured directly
+    # against this real GGUF file (llama-cpp-python's own load log, not just
+    # computed): 320 MiB at n_ctx=4096, scaling linearly to ~1.25 GiB at
+    # 16384 - well inside this entry's 8 GB memory_tier floor alongside the
+    # ~1.5 GB Q4_K_M weights. Chosen after a real invoice's extraction
+    # prompt alone hit ~3.7k tokens against the previous shared n_ctx=4096
+    # placeholder; 16384 leaves several times that much headroom for a
+    # larger invoice plus a JSON-repair round (which resends the original
+    # prompt once, not twice - see build_repair_prompt in prompts.py).
+    context_size=16384,
     description=(
         "Better extraction accuracy in our benchmarks, but slower inference and higher memory use"
     ),
@@ -85,60 +100,69 @@ GRANITE_3_3_2B_INSTRUCT_GGUF = ModelCatalogEntry(
     ],
 )
 
-QWEN3_0_6B_GGUF = ModelCatalogEntry(
-    id="qwen3-0.6b",
-    display_name="Qwen3 0.6B",
-    license="Apache 2.0",
-    # Qwen's own official GGUF repository only ships a single Q8_0 quant
-    # (no Q4_K_M/Q5_K_M range); Unsloth AI (a verified HF organization,
-    # widely used for GGUF quantization) is the reputable third-party
-    # source used here instead.
-    repository="unsloth/Qwen3-0.6B-GGUF",
-    revision="50968a4468ef4233ed78cd7c3de230dd1d61a56b",
+LLAMA_3_2_3B_INSTRUCT_GGUF = ModelCatalogEntry(
+    id="llama-3.2-3b-instruct",
+    display_name="Llama 3.2 3B Instruct",
+    # Meta's Llama 3.2 Community License, not Apache-2.0 like the other
+    # entry - acceptable for this app's local, non-redistributed use, but a
+    # real term difference worth keeping distinct from "Apache 2.0" here.
+    license="Llama 3.2 Community License",
+    # Meta doesn't publish a first-party GGUF; meta-llama/Llama-3.2-3B-Instruct
+    # itself is a gated repository (requires an accepted license + HF auth
+    # token this app's installer doesn't support), so both the GGUF weights
+    # and the tokenizer/template mirror below are pinned to Unsloth AI's
+    # ungated repositories instead - the same verified-HF-org standard
+    # already used for Qwen3's GGUF in the entry this one replaces.
+    repository="unsloth/Llama-3.2-3B-Instruct-GGUF",
+    revision="e7d0997e49c9cb00d88b4c1a6a16aa894b0bbc31",
     memory_tier=MemoryTier.SMALL,
-    prompt_template="chatml",
-    description="Faster inference and lower memory use",
+    prompt_template="llama3",
+    # 16384 (native support: 131072). KV cache cost measured directly
+    # against this real GGUF file: 1792 MiB at n_ctx=16384 (matches Qwen's
+    # per-token cost exactly - both have 28 layers, 8 kv heads, head_dim
+    # 128), well inside this entry's 8 GB memory_tier floor alongside the
+    # ~1.9 GB Q4_K_M weights. See the Granite entry above for why 16384.
+    context_size=16384,
+    description="Alternative instruction-tuned model; not yet in docs/model_benchmark_findings.md",
     files=[
         ModelFile(
-            path="Qwen3-0.6B-Q4_K_M.gguf",
-            sha256="ac2d97712095a558e31573f62f466a3f9d93990898b0ec79d7c974c1780d524a",
-            size_bytes=396_705_472,
+            path="Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+            sha256="6c99cc00ae910f6a532a80022cb4bc1939094527a089c29294b841c0bd87f74d",
+            size_bytes=2_019_377_600,
         ),
         # Tokenizer/chat-template assets: no GGUF release of this model ships
-        # these, so they're pinned to the same base-model repository/revision
-        # already verified for QWEN3_0_6B in catalog_data.py.
+        # these, and the real base-model repository (meta-llama/Llama-3.2-3B-
+        # Instruct) is gated, so these are pinned to Unsloth's ungated
+        # full-precision mirror of the same model instead. Llama 3's
+        # tokenizer is tokenizer.json-only (no separate merges.txt/vocab.json
+        # the way Qwen/Granite's GPT2-style tokenizers need) - confirmed
+        # empirically, not assumed, by loading AutoTokenizer with exactly
+        # this file set and nothing else.
         ModelFile(
             path="tokenizer.json",
-            sha256="aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
-            size_bytes=11_422_654,
-            repository="Qwen/Qwen3-0.6B",
-            revision="c1899de289a04d12100db370d81485cdf75e47ca",
+            sha256="6b9e4e7fb171f92fd137b777cc2714bf87d11576700a1dcd7a399e7bbe39537b",
+            size_bytes=17_209_920,
+            repository="unsloth/Llama-3.2-3B-Instruct",
+            revision="006f5dcd1393c3add266de40994ba96225e9689d",
         ),
         ModelFile(
             path="tokenizer_config.json",
-            sha256="d5d09f07b48c3086c508b30d1c9114bd1189145b74e982a265350c923acd8101",
-            size_bytes=9_732,
-            repository="Qwen/Qwen3-0.6B",
-            revision="c1899de289a04d12100db370d81485cdf75e47ca",
+            sha256="9ddd255c19fe319c8d4e891163540382e9fbda99f394674f2a929efc47d57458",
+            size_bytes=54_669,
+            repository="unsloth/Llama-3.2-3B-Instruct",
+            revision="006f5dcd1393c3add266de40994ba96225e9689d",
         ),
         ModelFile(
-            path="merges.txt",
-            sha256="8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
-            size_bytes=1_671_853,
-            repository="Qwen/Qwen3-0.6B",
-            revision="c1899de289a04d12100db370d81485cdf75e47ca",
-        ),
-        ModelFile(
-            path="vocab.json",
-            sha256="ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
-            size_bytes=2_776_833,
-            repository="Qwen/Qwen3-0.6B",
-            revision="c1899de289a04d12100db370d81485cdf75e47ca",
+            path="special_tokens_map.json",
+            sha256="94e708c3f5e64acf85bbe5ad01467a1248faadb73e83b41793087ecced586e8f",
+            size_bytes=454,
+            repository="unsloth/Llama-3.2-3B-Instruct",
+            revision="006f5dcd1393c3add266de40994ba96225e9689d",
         ),
     ],
 )
 
 SHORTLISTED_CATALOG: list[ModelCatalogEntry] = [
     GRANITE_3_3_2B_INSTRUCT_GGUF,
-    QWEN3_0_6B_GGUF,
+    LLAMA_3_2_3B_INSTRUCT_GGUF,
 ]

@@ -33,7 +33,7 @@ from invoice_renamer.models.installer import install_dir_for
 # installed tokenizer actually has a chat_template at all. A future catalog
 # entry with an unverified/different template shape must fail loudly here,
 # not silently render with whatever the tokenizer happens to ship.
-_SUPPORTED_PROMPT_TEMPLATES = frozenset({"chatml", "granite-instruct"})
+_SUPPORTED_PROMPT_TEMPLATES = frozenset({"chatml", "granite-instruct", "llama3"})
 
 
 class LlamaCppExtractor:
@@ -79,7 +79,7 @@ class LlamaCppExtractor:
         data_dir: Path,
         *,
         device: str = "cpu",
-        n_ctx: int = 4096,
+        n_ctx: int | None = None,
         max_new_tokens: int = 512,
         repetition_penalty: float = 1.15,
         verbose: bool = False,
@@ -87,10 +87,11 @@ class LlamaCppExtractor:
         """Load a GGUF model and its tokenizer/template from the local install dir.
 
         `local_files_only=True` is enforced; the method never touches the
-        network. `n_ctx` has no single correct default across models - 4096
-        is a placeholder sized for typical extraction/repair/shortening
-        prompts, not a measured per-model figure; pass an explicit value once
-        one is chosen for a given catalog entry.
+        network. `n_ctx` defaults to the catalog entry's own `context_size` -
+        pass an explicit value only to override it (e.g. standalone
+        validation against a model with no catalog entry). A catalog entry
+        with no `context_size` set fails loudly here rather than silently
+        falling back to one shared placeholder across every model.
         """
         if entry.prompt_template not in _SUPPORTED_PROMPT_TEMPLATES:
             raise ValueError(
@@ -98,6 +99,14 @@ class LlamaCppExtractor:
                 f"{entry.prompt_template!r}, which this backend hasn't been "
                 f"verified against (supported: {sorted(_SUPPORTED_PROMPT_TEMPLATES)})"
             )
+
+        if n_ctx is None:
+            if entry.context_size is None or entry.context_size <= 0:
+                raise ValueError(
+                    f"catalog entry {entry.id!r} has no context_size set; "
+                    "llama.cpp needs an explicit per-model n_ctx, not a shared default"
+                )
+            n_ctx = entry.context_size
 
         install_dir = install_dir_for(entry, data_dir)
 

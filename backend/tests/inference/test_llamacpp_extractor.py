@@ -17,6 +17,7 @@ def _entry(
     *,
     extra_gguf_files: list[ModelFile] | None = None,
     prompt_template: str | None = "chatml",
+    context_size: int | None = 4096,
 ) -> ModelCatalogEntry:
     return ModelCatalogEntry(
         id="tiny-gguf-model",
@@ -26,6 +27,7 @@ def _entry(
         revision=_VALID_REVISION,
         memory_tier=MemoryTier.SMALL,
         prompt_template=prompt_template,
+        context_size=context_size,
         files=[
             ModelFile(path="model.gguf", sha256="a" * 64, size_bytes=1),
             ModelFile(path="tokenizer.json", sha256="b" * 64, size_bytes=1),
@@ -430,7 +432,7 @@ def test_load_installed_rejects_an_unsupported_prompt_template(
         LlamaCppExtractor.load_installed(entry, tmp_path, device="cpu")
 
 
-@pytest.mark.parametrize("prompt_template", ["chatml", "granite-instruct"])
+@pytest.mark.parametrize("prompt_template", ["chatml", "granite-instruct", "llama3"])
 def test_load_installed_accepts_known_prompt_templates(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, prompt_template: str
 ) -> None:
@@ -440,6 +442,18 @@ def test_load_installed_accepts_known_prompt_templates(
     _patch_llama_cpp(monkeypatch, _FakeLlamaModel())
 
     LlamaCppExtractor.load_installed(entry, tmp_path, device="cpu")
+
+
+def test_load_installed_rejects_a_catalog_entry_with_no_context_size(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry = _entry(context_size=None)
+    _install_gguf(tmp_path, entry)
+    _patch_tokenizer(monkeypatch, _FakeLlamaTokenizer())
+    _patch_llama_cpp(monkeypatch, _FakeLlamaModel())
+
+    with pytest.raises(ValueError, match="no context_size set"):
+        LlamaCppExtractor.load_installed(entry, tmp_path, device="cpu")
 
 
 def test_load_installed_rejects_an_installed_tokenizer_with_no_chat_template(
@@ -476,7 +490,7 @@ def test_load_installed_sets_repetition_penalty_window_to_the_full_context(
     assert created_kwargs[0]["last_n_tokens_size"] == 8192
 
 
-def test_load_installed_honors_an_explicit_context_size(
+def test_load_installed_lets_an_explicit_n_ctx_override_the_catalog_entry(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     fake_tokenizer = _FakeLlamaTokenizer()
@@ -489,9 +503,30 @@ def test_load_installed_honors_an_explicit_context_size(
         lambda **kwargs: (created_kwargs.append(kwargs), _FakeLlamaModel())[1],
     )
 
+    # _entry()'s own context_size defaults to 4096; passing n_ctx here must
+    # win over it.
     LlamaCppExtractor.load_installed(_entry(), tmp_path, device="cpu", n_ctx=8192)
 
     assert created_kwargs[0]["n_ctx"] == 8192
+
+
+def test_load_installed_defaults_n_ctx_to_the_catalog_entrys_context_size(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    fake_tokenizer = _FakeLlamaTokenizer()
+    _patch_tokenizer(monkeypatch, fake_tokenizer)
+    entry = _entry(context_size=16384)
+    _install_gguf(tmp_path, entry)
+
+    created_kwargs: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        "invoice_renamer.inference.llamacpp_extractor.Llama",
+        lambda **kwargs: (created_kwargs.append(kwargs), _FakeLlamaModel())[1],
+    )
+
+    LlamaCppExtractor.load_installed(entry, tmp_path, device="cpu")
+
+    assert created_kwargs[0]["n_ctx"] == 16384
 
 
 def test_tokenizer_property_exposes_the_injected_tokenizer(
@@ -545,6 +580,7 @@ def test_load_installed_fails_when_catalog_declares_no_gguf_file(
         revision=_VALID_REVISION,
         memory_tier=MemoryTier.SMALL,
         prompt_template="chatml",
+        context_size=4096,
         files=[ModelFile(path="tokenizer.json", sha256="b" * 64, size_bytes=1)],
     )
     install_dir = install_dir_for(entry, tmp_path)

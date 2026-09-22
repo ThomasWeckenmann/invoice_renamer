@@ -46,7 +46,7 @@ From a clone of this repository:
    cargo tauri dev
    ```
 
-On first launch, use the model manager in the app to download a local model before analyzing invoices — no model is bundled or downloaded automatically. Two are offered: **Qwen3-0.6B**, which the app selects automatically once it is installed, and **Granite-3.3-2B-Instruct**, which is slower (~16-18s vs ~5-12s per invoice) but noticeably more accurate on amounts and dates. Pick Granite in the Model panel if a proposed filename has to be right more often than it has to be fast; see `docs/model_benchmark_findings.md` for the measured difference.
+On first launch, use the model manager in the app to download a local model before analyzing invoices — no model is bundled or downloaded automatically. Two are offered: **Llama 3.2 3B Instruct**, which the app selects automatically once it is installed, and **Granite-3.3-2B-Instruct**. Granite's accuracy is backed by `docs/model_benchmark_findings.md`'s measured comparison against the model Llama 3.2 replaced; Llama 3.2 itself doesn't have a documented benchmark entry yet.
 
 Re-run step 1 after changing backend (Python) code — the worker is a separate build artifact and isn't rebuilt automatically by `cargo tauri dev`. It's built for the machine you build it on, and the Tauri build refuses to package a worker built for a different architecture.
 
@@ -113,4 +113,4 @@ The [third-party notices](backend/THIRD-PARTY-LICENSES) include the following ma
 
 These notices are included in the packaged worker at `_internal/THIRD-PARTY-LICENSES`. They cover the macOS OCR additions, not every application dependency; see the notices for the separate libffi caveat.
 
-The [model catalog](backend/src/invoice_renamer/models/catalog_data.py) records Apache 2.0 for both Granite 3.3 2B Instruct and Qwen3 0.6B. Models are downloaded separately through the app and are not bundled with it. Dependency and model licenses are separate from the project's own license.
+The [model catalog](backend/src/invoice_renamer/models/gguf_catalog.py) records each shipped model's license: Apache 2.0 for Granite 3.3 2B Instruct, and the Llama 3.2 Community License for Llama 3.2 3B Instruct. Models are downloaded separately through the app and are not bundled with it. Dependency and model licenses are separate from the project's own license.
