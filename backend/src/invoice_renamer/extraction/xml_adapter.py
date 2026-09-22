@@ -2,8 +2,7 @@
 validated InvoiceExtraction fields. Never sent to the model - this is pure,
 deterministic parsing of a namespace-qualified document tree.
 
-Field semantics (verified against the CII D16B / EN16931 schema and the sample
-Factur-X invoice in fixtures/ZUGFeRD-Example.pdf):
+Field semantics (verified against the CII D16B / EN16931 schema):
 - Issue date: rsm:ExchangedDocument/ram:IssueDateTime/udt:DateTimeString, only
   format="102" (CCYYMMDD, UN/CEFACT code list 2379) is supported.
 - Seller name: .../ram:ApplicableHeaderTradeAgreement/ram:SellerTradeParty/ram:Name.

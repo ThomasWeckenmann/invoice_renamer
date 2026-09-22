@@ -46,9 +46,8 @@ def test_complete_invoice_maps_every_field_with_xml_evidence() -> None:
 
 
 def test_real_zugferd_example_maps_grand_total_not_due_payable() -> None:
-    # fixtures/ZUGFeRD-Example.pdf's grand total (1428.00) equals its due payable
-    # amount since it has no prepayment - this XML has both differ, so a wrong
-    # implementation that read DuePayableAmount would fail this instead.
+    # Prepayment makes the due payable amount differ from the gross total,
+    # so reading DuePayableAmount instead of GrandTotalAmount must fail here.
     xml = """<?xml version="1.0" encoding="UTF-8"?>
 <rsm:CrossIndustryInvoice
     xmlns:rsm="urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100"

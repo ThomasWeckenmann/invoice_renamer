@@ -1,5 +1,9 @@
 # Changelog
 
+## Version 1.2.4 (2026-09-22, GPT-6)
+
+- Remove the externally sourced ZUGFeRD example fixture
+
 ## Version 1.2.3 (2026-09-22, GPT-6)
 
 - bugfix: Use 1024-based GB conversion for RAM and worker memory status
