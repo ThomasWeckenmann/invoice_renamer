@@ -2,7 +2,7 @@
  * use, and whether inference is GPU-accelerated, kept visible outside the
  * Model section's collapsible state. */
 
-import { formatDecimalGB } from "../../../lib/format";
+import { formatMemoryGB } from "../../../lib/format";
 import type { MemorySnapshot, ModelStatusEntry } from "../../../lib/api/types";
 import { useMemoryStatus } from "../useMemoryStatus";
 
@@ -81,10 +81,10 @@ export function MemoryStatus({ models }: { models: ModelStatusEntry[] }) {
         className={`memory-status__item${ramSeverityClass(snapshot, stale)}`}
         title={itemTitle(RAM_TOOLTIP)}
       >
-        RAM {formatDecimalGB(usedBytes)} / {formatDecimalGB(snapshot.system_total_bytes)}
+        RAM {formatMemoryGB(usedBytes)} / {formatMemoryGB(snapshot.system_total_bytes)}
       </span>
       <span className="memory-status__item" title={itemTitle(WORKER_TOOLTIP)}>
-        Worker {formatDecimalGB(snapshot.worker_rss_bytes)}
+        Worker {formatMemoryGB(snapshot.worker_rss_bytes)}
       </span>
       {snapshot.gpu_in_use && (
         <span className="memory-status__item" title={itemTitle(GPU_TOOLTIP)}>

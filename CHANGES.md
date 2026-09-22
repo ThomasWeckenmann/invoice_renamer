@@ -1,5 +1,9 @@
 # Changelog
 
+## Version 1.2.3 (2026-09-22, GPT-6)
+
+- bugfix: Use 1024-based GB conversion for RAM and worker memory status
+
 ## Version 1.2.2 (2026-09-22, GPT-6)
 
 - Replace Llama with experimental Apache-licensed Qwen3 4B Instruct 2507
