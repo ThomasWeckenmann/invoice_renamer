@@ -35,7 +35,16 @@ accelerated badge, analysis, and unload all work, no torch package/binary
 in the bundle; full generation completion through the frozen worker on
 Linux and actual CUDA GPU offload remain pending on hardware this sandbox
 doesn't have; all unit tests/ruff/mypy green) — see the note near the end
-of Block 5, added 2026-09-22.
+of Block 5, added 2026-09-22. Block 6 confirmed live by the user: the full
+app workflow (download, load, analyze, shorten, switch, unload) works end
+to end on the target Mac. Block 7 code-reviewed and closed (2026-09-22):
+revision pinning, path traversal, and privacy/logging are confirmed safe
+with cited references; dependency legitimacy and build-time supply chain
+confirmed clean via direct source inspection; two narrow, honestly-tracked
+residuals remain (an unconfirmed `ggml_nbytes()` overflow-CVE patch status
+in the exact vendored build, and a third-party `LlamaModel.__init__` vocab-
+failure edge case that can leak a native handle) — see the note at the end
+of Block 7.
 
 ## Goal
 
@@ -1052,6 +1061,12 @@ Acceptance: both catalog models complete the live app workflow, including
 name shortening, model switching, and unloading. Any observed app regression
 is resolved or explicitly accepted before the app migration is complete.
 
+**Confirmed live by the user (2026-09-22):** the full live app workflow
+this block's own bullets describe (download, offline load, real-invoice
+analysis, proposed filename, name shortening, model switching, explicit and
+idle-timeout unload) was run end to end on the target Mac with no
+regression reported. No further action open on this block.
+
 ## Block 7: Security, sanity, and safety
 
 - Revision/provenance pinning: confirm the new GGUF catalog entries pin a
@@ -1097,6 +1112,177 @@ done.
 Acceptance: every item above is either confirmed safe with a cited
 reference to the actual code, or has a tracked follow-up if something
 genuinely can't be closed out in this plan.
+
+**Reviewed item by item (2026-09-22):**
+
+1. **Revision/provenance pinning — confirmed safe, already enforced by a
+   dedicated test, not by the Pydantic schema itself.**
+   `models/catalog.py`'s `ModelCatalogEntry.revision`/`ModelFile.revision`
+   fields have no format validator at all (unlike
+   `transformers_extractor.py`'s `_PINNED_REVISION` check) - constructing an
+   entry with `revision="main"` would pass schema validation. Considered
+   adding a validator there, but the existing test suite already enforces
+   this correctly, in the right place: `tests/models/test_gguf_catalog.py`'s
+   `test_entries_pin_a_real_commit_revision_not_a_floating_ref()` asserts
+   every real `SHORTLISTED_CATALOG` entry's revision against the same
+   `_PINNED_REVISION` pattern, and
+   `test_tokenizer_files_pin_a_source_distinct_from_the_guffs_own()` asserts
+   the same for every per-file override's revision, plus that it's a
+   genuinely different source from the GGUF's own. A schema-level validator
+   would additionally have forced every other test file that constructs a
+   `ModelCatalogEntry`/`ModelFile` for unrelated purposes (`test_catalog.py`,
+   `test_installer.py` - confirmed via grep, several use placeholders like
+   `"abc123"`/`"deadbeef"`) to switch to realistic 40-hex fakes for no
+   safety benefit, since these entries are developer-authored constants, not
+   attacker-controlled input - the real risk `_PINNED_REVISION` guards
+   against is a catalog-authoring mistake, not malicious external input, and
+   that's exactly what the dedicated catalog test already catches. Directly
+   re-verified both real entries' every revision (entry-level and every
+   per-file override) against the pattern programmatically - all five real
+   revision strings in `models/gguf_catalog.py` are genuine 40-hex commit
+   SHAs. `models/installer.py:install()`'s per-file loop (line 155-176)
+   calls `_effective_source()` then `_file_is_already_verified()`
+   unconditionally for every file regardless of source, confirmed already
+   read in this session - no source is exempted from checksum verification.
+2. **`trust_remote_code` risk class — confirmed narrower than a general
+   GGUF-loading tool, with a real but currently out-of-reach residual risk
+   named rather than dismissed.** Searched for current GGUF-parser CVEs
+   rather than assuming the risk is theoretical: real ones exist in exactly
+   this class - CVE-2025-53630 and its 2026 incomplete-fix bypass
+   CVE-2026-27940 (heap buffer overflow via integer overflow in
+   `gguf_init_from_file_impl`'s `mem_size` calculation, fixed upstream at
+   llama.cpp build b8146), CVE-2026-33298 (integer overflow in
+   `ggml_nbytes()` via crafted tensor dimensions, fixed before build b7824),
+   and CVE-2026-7482 ('Bleeding Llama', a crafted GGUF leaking process
+   memory - Ollama-specific, not this app's architecture). Read the actual
+   vendored `ggml/src/gguf.cpp` inside the installed `llama-cpp-python==0.3.35`
+   sdist directly rather than trusting the version number alone: explicit
+   `SIZE_MAX`/`INT64_MAX` overflow guards are present around tensor-dimension
+   products and the exact `mem_size = overhead + ctx->size` calculation these
+   CVEs concern (`gguf.cpp:694-696,733,787-788,824`), consistent with a
+   patched state for the `gguf_init_from_file_impl` class of bug. Could not
+   reach the same confidence for `ggml_nbytes()` itself (CVE-2026-33298):
+   the vendored `ggml/src/ggml.c:1297`'s implementation has no overflow guard
+   in its own body, and the sdist carries no embedded git commit/build
+   number to pin against the advisory's 'fixed before build b7824' - whether
+   an equivalent guard exists at every call site was not fully traced. This
+   is a genuine, tracked-not-closed residual: `llama-cpp-python==0.3.35`
+   (2026-08-17) is confirmed the current release on PyPI as of this review
+   (nothing newer to bump to), so there's no available upgrade today, only
+   an ongoing duty to re-check this dependency as new releases land, given
+   how active this exact CVE class currently is. Real mitigating factor
+   specific to this app, confirmed by reading the code rather than assumed:
+   this app never loads an arbitrary or user-supplied GGUF file. `_entry_or_404()`
+   (`analyses_routes.py:100-103`) only accepts a `model_id` looked up against
+   the fixed `SHORTLISTED_CATALOG`, and `_resolve_gguf_file()`
+   (`llamacpp_extractor.py:276-294`) resolves the path from that same entry's
+   own declared, sha256-verified files - so the 'malicious GGUF' threat model
+   here is narrowed to 'the two pinned files this app downloads get
+   compromised at their verified source,' already covered by item 1, not
+   'a user opens an arbitrary downloaded model' the way Ollama/'Bleeding
+   Llama' is exposed. `trust_remote_code=False` is still carried through
+   unchanged for the tokenizer-only load (`llamacpp_extractor.py:118`).
+3. **Path traversal — confirmed unchanged and format-agnostic, now with a
+   dedicated regression test over the real catalog.**
+   `installer.py:_resolve_file_path()` (lines 42-47) is untouched by this
+   plan and operates on `file.path` as an opaque string regardless of
+   whether it names a `.safetensors` or `.gguf` file - already true by
+   inspection, and now also exercised directly:
+   `test_gguf_catalog.py:test_every_entrys_files_resolve_within_its_install_dir()`
+   resolves every real file path in both live GGUF catalog entries and
+   asserts each stays within its install directory.
+4. **Resource cleanup — confirmed safe for this app's own code; one narrow,
+   upstream-owned leak scenario and one separate, unfixable-at-this-layer
+   risk named rather than assumed away.** `runtime.py:125-131`'s `finally`
+   clause is unchanged and still clears `_loading`/`_loading_entry_id` on a
+   raising load; traced a repeated-failed-load sequence through
+   `get_or_load()` directly (not assumed): `self._extractor`/`self._loaded`
+   are only ever assigned *after* `load_installed()` returns successfully
+   (lines 127-132), so a failing load leaves both at the same `None` state
+   `_unload_current()` already set before the attempt - no stale or
+   dangling reference survives a retry. Read the installed
+   `llama-cpp-python`'s own `_internals.py` to check what a raise inside
+   `Llama.__init__()` actually leaks (not assumed): `Llama.__init__` builds
+   an `ExitStack` and registers each native resource
+   (`LlamaModel`/`LlamaContext`/`LlamaBatch`) immediately after it's
+   successfully allocated, and each of those classes independently
+   implements `__del__` closing its own already-populated stack - so a raise
+   partway through `Llama.__init__()` (e.g. `LlamaContext`'s
+   `llama_init_from_model()` failing under memory pressure, the exact
+   failure this session's own Block 5 testing hit live) relies on CPython's
+   deterministic refcounting, not a `gc.collect()` sweep, to finalize the
+   already-built pieces and free their native handles - confirmed this
+   app's own code doesn't defeat that: `analyses_routes.py:_run_job()`'s
+   `except Exception as exc:` only keeps `str(exc)` (line 327), and
+   Python 3's `except ... as exc:` clause auto-clears `exc`'s traceback at
+   the end of the block, so nothing here pins the partially-built object
+   alive. One narrow gap found in the third-party binding itself, not
+   fixable in this app's own code: `LlamaModel.__init__`
+   (`_internals.py:36-76`) raises `ValueError` if
+   `llama_model_get_vocab()` returns `None`, but only registers its
+   `free_model` cleanup callback *after* that check - a real native model
+   handle would leak in that specific, narrow scenario (a GGUF valid enough
+   to load but that fails vocab lookup), tracked as an upstream issue rather
+   than something to work around here. Separately, and not a leak question
+   at all: a real out-of-memory condition can be a hard, uncatchable process
+   abort at the C++/kernel level (this session's own Linux packaging test
+   was killed by the kernel's OOM-killer, not a Python exception) - no
+   amount of `finally`/`ExitStack` cleanup addresses that class of failure;
+   the existing `models/compatibility.py` memory-tier gate is the app's only
+   real mitigation, and it's advisory-only today
+   (`analyses_routes.py:create_analysis()` never checks `compatible` before
+   accepting a job) - unchanged, pre-existing behavior from before this
+   plan, not a regression it introduced, but worth naming here since this
+   plan is what made the failure mode reachable in an under-provisioned
+   sandbox.
+5. **Privacy — confirmed by direct source reading of the binding, not
+   assumed.** `LlamaCppExtractor.__init__` passes `verbose=False` by default
+   (`llamacpp_extractor.py:55,68`), and nothing in `runtime.py`'s
+   `LoadInstalledFn` call shape (the only production call path) ever
+   overrides it. Read the installed binding's own `llama.py`/`_internals.py`
+   for every `print(..., file=sys.stderr)` call near model loading and
+   completion: all of them are gated behind `if self.verbose:` (confirmed
+   for the load-time metadata dump, the `Llama.generate`/`_create_completion`
+   cache-hit/miss lines, and `llama_print_system_info()`) - none print
+   prompt or completion content unconditionally. Also checked
+   `llama_cpp`'s own on-disk prompt cache feature (`self.cache`,
+   `set_cache()`): grepped this project's own code and confirmed
+   `set_cache()` is never called, so that feature - which would otherwise
+   persist prompt+completion state to disk - is never activated. This
+   app's own diagnostic paths (`llamacpp_extractor.py:239-249,260-265`)
+   already only print token counts/termination reason to stderr, keeping
+   full text solely in the returned diagnostic string, matching
+   `transformers_extractor.py:147-151`'s existing standard exactly.
+   Packaging logs (PyInstaller's `warn-*.txt`/build output, and this
+   session's own frozen-worker test logs) can't contain invoice content by
+   construction - the build only performs static import analysis and is
+   never run against real documents.
+6. **Dependency supply chain — confirmed legitimate maintainer and no
+   build-time network fetch, live-checked rather than assumed.**
+   `llama_cpp_python-0.3.35`'s own installed `METADATA` names
+   Andrei Betlen (`abetlen@gmail.com`) as author, matching
+   `github.com/abetlen/llama-cpp-python` - the de facto standard, long-
+   established Python binding for llama.cpp, MIT-licensed, with its own
+   readthedocs documentation. Confirmed via PyPI's own JSON API that
+   `0.3.35` is the current release as of this review, not a stale pin.
+   Grepped both `llama-cpp-python`'s own top-level `CMakeLists.txt` and the
+   vendored `llama.cpp/CMakeLists.txt` for `FetchContent`/
+   `ExternalProject_Add`/`GIT_REPOSITORY` - none exist; every URL found is a
+   comment referencing a GitHub issue/discussion, not a build-time fetch.
+   The full `llama.cpp`/`ggml` C++ source ships vendored directly inside the
+   PyPI sdist tarball itself (confirmed by extracting and reading it, not
+   assumed from the package description) - `pip`/`uv install` compiles only
+   what's already in that tarball via CMake, with no reach to an external
+   or unpinned location during install. `cmake`/`ninja` themselves are
+   pulled as ordinary PEP 517 build dependencies (the `cmake` PyPI package
+   bundles its own binary), already confirmed in this session's Block 5
+   work.
+
+Item 2's residual (whether `ggml_nbytes()`'s specific overflow is patched in
+this exact vendored build) and item 4's two named upstream/process-level
+gaps are the only things this review couldn't fully close out - tracked
+here rather than assumed safe, per this block's own Acceptance wording.
+Everything else is confirmed safe with a cited reference to the actual code.
 
 ## Block 8: Swap Qwen3-0.6B for Llama 3.2 3B Instruct
 
@@ -1194,6 +1380,15 @@ was not rebuilt as part of this block. No entry added to
 is not a substitute for the documented, repeatable 5-invoice comparison the
 other two models have; a real benchmark entry is a tracked follow-up, not
 required to close this block.
+
+**The sidecar-rebuild/full-app gap above is now closed:** Block 5's
+`--exclude-module torch` work rebuilt the worker sidecar (both this
+sandbox's Linux mirror and the user's own Mac via `scripts/build_worker_sidecar.sh`
++ `scripts/build_macos_app.sh`), and Block 6's live validation ran the full
+`AnalysisCoordinator` → `ModelRuntime` → `LlamaCppExtractor` path against
+this entry through the real packaged app on the user's Mac, confirmed all
+good. Only the `docs/model_benchmark_findings.md` entry remains an
+intentional, tracked follow-up, not required to close this plan.
 
 **Live memory comparison against Ollama (2026-09-22):** the user asked why
 the packaged app's worker process shows real memory (Activity Monitor)
