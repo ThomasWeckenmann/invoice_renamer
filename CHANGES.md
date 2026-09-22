@@ -1,5 +1,13 @@
 # Changelog
 
+## Version 1.2.2 (2026-09-22, GPT-6)
+
+- Replace Llama with experimental Apache-licensed Qwen3 4B Instruct 2507
+
+  Keep Granite as the preferred default. Pin Qwen weights, tokenizer, and license;
+  require 16 GB memory and label it as not yet benchmarked for invoice extraction.
+  Remove current Llama attribution; existing model downloads are not deleted.
+
 ## Version 1.2.1 (2026-09-22, claude sonnet-5)
 
 - Correct extractor.py's docstring, which wrongly claimed extract_invoice() never raises

@@ -6,7 +6,10 @@ from pathlib import Path
 from invoice_renamer.models.capabilities import AccelerationBackend, SystemCapabilities
 from invoice_renamer.models.catalog import ModelCatalogEntry, ModelFile
 from invoice_renamer.models.compatibility import check_compatibility
-from invoice_renamer.models.gguf_catalog import SHORTLISTED_CATALOG
+from invoice_renamer.models.gguf_catalog import (
+    QWEN3_4B_INSTRUCT_2507_GGUF,
+    SHORTLISTED_CATALOG,
+)
 from invoice_renamer.models.installer import _resolve_file_path, install_dir_for
 
 _PINNED_REVISION = re.compile(r"^[0-9a-f]{40}$")
@@ -79,9 +82,9 @@ def test_all_tokenizer_files_in_an_entry_share_one_base_model_source() -> None:
         assert len(sources) == 1, entry.id
 
 
-def test_entries_are_compatible_with_the_plans_8gb_floor() -> None:
+def test_entries_are_compatible_with_16gb_hosts() -> None:
     capabilities = SystemCapabilities(
-        acceleration=AccelerationBackend.CPU, memory_gb=8.0, free_disk_gb=100.0
+        acceleration=AccelerationBackend.CPU, memory_gb=16.0, free_disk_gb=100.0
     )
     for entry in SHORTLISTED_CATALOG:
         result = check_compatibility(entry, capabilities)
@@ -95,3 +98,12 @@ def test_every_entrys_files_resolve_within_its_install_dir(tmp_path: Path) -> No
         for file in entry.files:
             resolved = _resolve_file_path(install_dir, file)
             assert resolved.resolve().is_relative_to(install_dir.resolve()), (entry.id, file.path)
+
+
+def test_qwen_requires_more_than_8gb_for_its_context_cache() -> None:
+    capabilities = SystemCapabilities(
+        acceleration=AccelerationBackend.CPU, memory_gb=8.0, free_disk_gb=100.0
+    )
+    result = check_compatibility(QWEN3_4B_INSTRUCT_2507_GGUF, capabilities)
+    assert not result.compatible
+    assert result.reasons == ["needs at least 16 GB memory; this device has 8 GB"]

@@ -46,7 +46,7 @@ From a clone of this repository:
    cargo tauri dev
    ```
 
-On first launch, use the model manager in the app to download a local model before analyzing invoices — no model is bundled or downloaded automatically. Two are offered: **Llama 3.2 3B Instruct**, which the app selects automatically once it is installed, and **Granite-3.3-2B-Instruct**. Granite's accuracy is backed by `docs/model_benchmark_findings.md`'s measured comparison against the model Llama 3.2 replaced; Llama 3.2 itself doesn't have a documented benchmark entry yet.
+On first launch, use the model manager to download a local model — no model is bundled or downloaded automatically. **Granite 3.3 2B Instruct** is the preferred default. **Qwen3 4B Instruct 2507** is an experimental alternative, not yet benchmarked for invoice extraction (about 2.51 GB download; requires at least 16 GB system memory).
 
 Re-run step 1 after changing backend (Python) code — the worker is a separate build artifact and isn't rebuilt automatically by `cargo tauri dev`. It's built for the machine you build it on, and the Tauri build refuses to package a worker built for a different architecture.
 
@@ -113,4 +113,4 @@ The [third-party notices](backend/THIRD-PARTY-LICENSES) include the following ma
 
 These notices are included in the packaged worker at `_internal/THIRD-PARTY-LICENSES`. They cover the macOS OCR additions, not every application dependency; see the notices for the separate libffi caveat.
 
-The [model catalog](backend/src/invoice_renamer/models/gguf_catalog.py) records each shipped model's license: Apache 2.0 for Granite 3.3 2B Instruct, and the Llama 3.2 Community License for Llama 3.2 3B Instruct. Models are downloaded separately through the app and are not bundled with it. Dependency and model licenses are separate from the project's own license.
+The [model catalog](backend/src/invoice_renamer/models/gguf_catalog.py) records Apache 2.0 for both Granite 3.3 2B Instruct and Qwen3 4B Instruct 2507. Models are downloaded separately and are not bundled with the app. Qwen's download includes its upstream license. Dependency and model licenses are separate from the project's own MIT license.
