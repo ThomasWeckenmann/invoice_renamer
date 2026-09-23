@@ -9,7 +9,10 @@ hosting-invoice.pdf → 2026-01-15_Beispiel-GmbH_Cloud-Hosting_595-EUR.pdf
 ```
 
 It combines embedded invoice XML, PDF text extraction, OCR, and local AI.
-It is also an experiment in AI-assisted software development. Build it from
+It is the author's first complete project built around on-device inference
+with open models; the [development story](docs/DEVELOPMENT_STORY.md) follows
+the decisions and lessons.
+Build it from
 source using the instructions below; no ready-made app download is provided.
 
 ![Invoice workspace with a model selected and three proposed filenames](docs/images/workspace.png)

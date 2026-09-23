@@ -1,5 +1,9 @@
 # Changelog
 
+## Version 1.2.6 (2026-09-23, GPT-6, claude sonnet-5)
+
+- Add a detailed development story and link it from the README
+
 ## Version 1.2.5 (2026-09-23, GPT-6)
 
 - Revamp the README with UI screenshots, workflow, and supported formats
