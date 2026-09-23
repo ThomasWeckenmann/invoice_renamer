@@ -1,101 +1,197 @@
 # Invoice Renamer
 
-A macOS and Linux desktop app that analyzes German and English invoice PDFs and proposes filenames in the form:
+Turn invoice filenames into something you can find again. Invoice Renamer is a
+macOS and Linux desktop app that reads German and English invoices locally,
+proposes descriptive names, and lets you review them before renaming.
 
-`YYYY-MM-DD_Seller_Product_Amount-CURRENCY.pdf`
+```text
+hosting-invoice.pdf → 2026-01-15_Beispiel-GmbH_Cloud-Hosting_595-EUR.pdf
+```
 
-See `docs/plans_open/01_implementation-plan.md` for the full implementation plan.
+It combines embedded invoice XML, PDF text extraction, OCR, and local AI.
+It is also an experiment in AI-assisted software development. Build it from
+source using the instructions below; no ready-made app download is provided.
 
-This project isn't distributed as a built app — build it yourself from source using the steps below.
+![Invoice workspace with a model selected and three proposed filenames](docs/images/workspace.png)
 
-## Prerequisites
+*Screenshots show the actual frontend with synthetic demo data and simulated
+worker/file operations. Timings and memory readings are illustrative.*
 
-- **Rust**, via [rustup](https://rustup.rs), plus the Tauri CLI: `cargo install tauri-cli --version "^2.0.0" --locked`
-- **Node.js** 20.19+ or 22.12+ (Vite 7's requirement) and npm
-- **Python 3.12** and [uv](https://docs.astral.sh/uv/)
-- **Linux only** — Tesseract OCR, with English and German language data:
-  `sudo apt install tesseract-ocr tesseract-ocr-deu`. macOS needs no OCR
-  package at all - scanned invoices are recognized through the OS's own
-  Vision framework.
-- **Linux only** — Tauri's native webview dependencies:
-  ```
-  sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file \
+## How it works
+
+1. **Import invoices.** Choose files or drag PDF/JPEG files into the window.
+2. **Select a local model and analyze.** Download a model once, then process a
+   batch or individual files. Documents run one at a time.
+3. **Read the invoice.** For PDFs, the app first checks for supported embedded
+   ZUGFeRD/Factur-X XML. Complete XML supplies the required fields directly.
+   Otherwise, it reads PDF text and uses OCR on pages with too little text.
+   JPEG images always go through OCR.
+4. **Extract and propose.** A local llama.cpp model extracts fields from the
+   text when needed. Valid XML fields take precedence over AI results. The app
+   builds a filename from the date, seller, product, amount, and currency.
+5. **Review and approve.** Inspect the extracted fields and warnings, edit the
+   filename if needed, and approve the files you want to rename.
+6. **Rename.** Apply approved names in the original folders. Document contents
+   stay unchanged. Use Undo to reverse a recorded batch, or Redo to reapply the
+   most recent undo during the same session.
+
+Complete supported XML skips text extraction, OCR, and extraction inference.
+Enabling **Shorten Names** still uses AI to shorten seller/product names.
+The current interface requires an installed model even for XML-only invoices.
+
+Proposed names follow `YYYY-MM-DD_Seller_Product_Amount-CURRENCY.pdf` or `.jpg`.
+Amounts are rounded to whole currency units; the review view retains the precise
+extracted amount. German umlauts are transliterated, unsafe characters are
+removed, and the filename stem is limited to 150 characters. Missing fields use
+placeholders and generate warnings. JPEG inputs, including `.jpeg`, get `.jpg`
+proposals without converting the image.
+
+## Supported files
+
+| Input | Support |
+|---|---|
+| Text PDFs | Extracts text directly; OCR on pages with insufficient text |
+| Scanned or mixed PDFs | OCR per page as needed |
+| JPG / JPEG scans | OCR, including EXIF orientation and CMYK images |
+| ZUGFeRD / Factur-X inside a PDF | CII D16B, EN16931/COMFORT profile |
+| Other embedded XML profiles or unusable XML | Falls back to PDF text/OCR and AI |
+| Standalone XML, PNG, TIFF, HEIC | Not supported |
+
+Files are limited to **50 MiB** each, PDFs to **200 pages**, and JPEGs to
+**8000 pixels per side**. Password-protected PDFs have no password-entry flow.
+Long documents can exceed the model's context limit even within these file limits.
+OCR is configured for German and English; other languages are not a supported claim.
+
+## Using the interface
+
+- **Import:** Choose files or drag them into the window. Removing an entry from
+  the list does not delete the source file.
+- **Model:** Download, select, or remove models. The status line shows model
+  residency, system RAM used/total, worker memory, and GPU use when available.
+- **Analyze:** Process pending invoices together, or use an individual row's
+  Analyze/Re-Run button. **Shorten Names** is off by default; enable it before
+  analysis for shorter seller/product names. **Unload after batch** releases
+  model memory once that run finishes.
+- **Review:** Turn off **Compact view** to see fields and **Run details**.
+  **Warnings/errors** filters rows needing attention. The Open button opens the
+  original document in your system viewer. Edit a proposed name directly.
+- **Approve and rename:** Approve individual rows or use **Approve all**, then
+  **Rename approved**. Always check the result: AI/OCR can make mistakes even
+  without a warning.
+
+![Expanded invoice review showing extracted XML fields and run details](docs/images/review.png)
+
+*The XML badges identify fields taken from the embedded invoice. Run details
+shows the extraction source and work performed; AI calls can be inspected when present.*
+
+![Completed rename batch with resulting filenames and Undo available](docs/images/renamed.png)
+
+*Renames happen only after approval and the explicit Rename action. Existing
+names receive a numbered suffix instead of being overwritten. A batch can
+partially succeed; each row reports its result.*
+
+**Undo** lets you choose a recorded batch, including after restarting the app.
+It verifies that the same file is still present and the original name is free.
+Moved/replaced files, occupied names, or a failure to save history can prevent
+Undo. **Redo** is available for the latest undo in the current session.
+
+## Models and hardware
+
+| Model | Download | Memory floor | Role |
+|---|---|---|---|
+| Granite 3.3 2B Instruct | About 1.55 GB | 8 GiB | Preferred default when installed |
+| Qwen3 4B Instruct 2507 | About 2.51 GB | 16 GiB | Experimental; not yet benchmarked for invoice extraction |
+
+Downloads include quantized GGUF weights and tokenizer assets. No model is
+bundled or downloaded automatically. The app checks available disk space and
+system memory; these are compatibility thresholds, not performance guarantees.
+Both models use a 16K-token context. CPU execution is supported; GPU acceleration
+depends on the hardware and how the installed llama.cpp binding was built.
+
+## Local processing and storage
+
+Invoice analysis runs in a local Python worker; the app communicates with it over
+loopback using a session token. The analysis path does not send invoices to a
+cloud AI service. After setup and model download, inference uses local files.
+Internet access is needed for dependency installation and Hugging Face model
+downloads; model files are pinned and verified with SHA-256 hashes.
+
+Models are stored under:
+
+- macOS: `~/Library/Application Support/invoice-renamer/models`
+- Linux: `~/.local/share/invoice-renamer/models`
+
+Rename history is stored as `rename_history.json` in the application's data
+directory and includes original/destination paths and file identity. Extracted
+fields and model-call details are held in the session. Local diagnostic output
+may contain invoice details, so review logs before sharing them.
+
+## Build and run
+
+### Prerequisites
+
+- **Python 3.12+** and [uv](https://docs.astral.sh/uv/)
+- **Node.js 20.19+ or 22.12+** and npm
+- **Rust**, installed through [rustup](https://rustup.rs), and the Tauri CLI:
+  `cargo install tauri-cli --version "^2.0.0" --locked`
+- **macOS:** Xcode Command Line Tools (`xcode-select --install`). OCR uses the
+  built-in Apple Vision framework; no separate OCR engine is needed.
+- **Linux:** Tesseract with English/German data and the Tauri webview dependencies.
+  On Debian/Ubuntu:
+
+  ```bash
+  sudo apt install tesseract-ocr tesseract-ocr-eng tesseract-ocr-deu \
+    libwebkit2gtk-4.1-dev build-essential curl wget file \
     libssl-dev libayatana-appindicator3-dev librsvg2-dev
   ```
-- **macOS only** — Xcode Command Line Tools: `xcode-select --install`
 
-## Building and running
+Windows is not a supported target.
 
-From a clone of this repository:
+### Run from source
 
-1. Build the Python worker the app bundles (PyInstaller):
+From the repository root:
 
-   ```
-   scripts/build_worker_sidecar.sh
-   ```
-
-2. Install frontend dependencies:
-
-   ```
-   cd app && npm install && cd ..
-   ```
-
-3. Run the app in dev mode, from the repository root:
-
-   ```
-   cargo tauri dev
-   ```
-
-On first launch, use the model manager to download a local model — no model is bundled or downloaded automatically. **Granite 3.3 2B Instruct** is the preferred default. **Qwen3 4B Instruct 2507** is an experimental alternative, not yet benchmarked for invoice extraction (about 2.51 GB download; requires at least 16 GB system memory).
-
-Re-run step 1 after changing backend (Python) code — the worker is a separate build artifact and isn't rebuilt automatically by `cargo tauri dev`. It's built for the machine you build it on, and the Tauri build refuses to package a worker built for a different architecture.
-
-### Linux, when this checkout is shared with a Mac
-
-Skip this if you're on a plain Linux install. It applies to setups like this
-project's devcontainer, where the same checkout is mounted into both a Mac
-host and a Linux container: `backend/.venv`, `app/node_modules`,
-`src-tauri/target`, and the staged worker are ordinary paths inside the
-checkout, so a Linux install or build writes Linux-specific files into paths
-the Mac side also uses, and the next `cargo tauri dev` on the Mac breaks.
-
-`scripts/linux_workspace.sh` avoids that by mirroring the checkout into a
-Linux-local directory outside the shared mount and running your command
-there, leaving the checkout's own `.venv`/`node_modules`/`target`/staged
-worker untouched. Run the same three steps through it instead:
-
+```bash
+scripts/build_worker_sidecar.sh
+npm --prefix app install
+cargo tauri dev
 ```
+
+On first launch, download and select a model in the Model section. Rebuild the
+worker after changing backend Python code; `cargo tauri dev` does not rebuild it.
+The worker must be built for the same platform and architecture as the app.
+
+### Linux checkout shared with a Mac
+
+When a Linux container and macOS use the same checkout, use the isolated Linux
+workspace to avoid replacing the Mac's dependencies and worker binaries:
+
+```bash
 scripts/linux_workspace.sh . scripts/build_worker_sidecar.sh
 scripts/linux_workspace.sh app npm install
 scripts/linux_workspace.sh . cargo tauri dev
 ```
 
-General form: `scripts/linux_workspace.sh {.|backend|app|src-tauri} <command...>`
-— the first argument picks the working directory inside the mirror, the rest
-is run there as-is (e.g. `scripts/linux_workspace.sh backend uv run pytest`).
+The wrapper mirrors sources into a Linux-local cache before each run. Re-run it
+after edits; it does not live-sync, and a running command holds the mirror lock.
+Use `scripts/linux_workspace.sh <directory> <command...>` for other Linux commands
+against a shared checkout as well.
 
-It's a snapshot, not a live editing workspace: each run re-syncs the mirror
-from the checkout before running your command, so edit the checkout as usual
-and re-run the wrapper to pick up changes — there's no automatic live sync,
-and a running `cargo tauri dev` holds the mirror until you stop it. Commands
-run directly in the checkout (not through the wrapper) are not protected by
-any of this.
+### Build a standalone macOS app
 
-## Building a standalone app
+After building the worker and installing frontend dependencies:
 
-`cargo tauri dev` above is the easiest way to develop or just use the app day to day. To get a real app you can launch directly (e.g. by double-clicking), build a release bundle instead, after completing steps 1 and 2 above:
-
-```
+```bash
 scripts/build_macos_app.sh
 ```
 
-This produces `src-tauri/target/release/bundle/macos/Invoice Renamer.app`.
+Output: `src-tauri/target/release/bundle/macos/Invoice Renamer.app`.
+The script inserts the worker with its required library/symlink layout, verifies
+it, and signs the assembled bundle. Use this script instead of bare
+`cargo tauri build`. A local build is not a notarized public release; macOS may
+require you to right-click the app and choose Open on first launch.
 
-Use that script rather than `cargo tauri build` on its own. The worker is a directory of libraries that PyInstaller ties together with symlinks, and Tauri's resource bundling resolves symlinks into duplicate files. The script runs the Tauri build, copies the worker into the app with its layout intact, checks the copy arrived complete, and re-signs the app if the build had signed it.
-
-On Linux, `cargo tauri build` still produces `deb/`, `appimage/` and/or `rpm/` packages, but they don't contain the worker; `cargo tauri dev` is the supported way to run the app there.
-
-This app isn't signed or notarized, since it's meant to be built and run by you, not distributed. That means macOS Gatekeeper blocks a plain double-click the first time — right-click the `.app` and choose Open once to bypass that; it opens normally after.
+Linux packages currently omit the worker; use `cargo tauri dev` on Linux.
 
 ## Licenses
 
