@@ -1,24 +1,21 @@
 # Invoice Renamer
 
-Turn invoice filenames into something you can find again. Invoice Renamer is a
-macOS and Linux desktop app that reads German and English invoices locally,
-proposes descriptive names, and lets you review them before renaming.
+Turn invoice filenames into something you can find again. 
+
+Invoice Renamer is a macOS and Linux desktop app that reads German and English invoices locally, proposes descriptive names, and lets you review them before renaming.
 
 ```text
 hosting-invoice.pdf → 2026-01-15_Beispiel-GmbH_Cloud-Hosting_595-EUR.pdf
 ```
 
-It combines embedded invoice XML, PDF text extraction, OCR, and local AI.
-It is the author's first complete project built around on-device inference
-with open models; the [development story](docs/DEVELOPMENT_STORY.md) follows
-the decisions and lessons.
-Build it from
-source using the instructions below; no ready-made app download is provided.
+It combines embedded invoice XML, PDF text extraction, OCR, and a local
+language model. Build it from source using the instructions below; there is
+no ready-made app download.
 
 ![Invoice workspace with a model selected and three proposed filenames](docs/images/workspace.png)
 
 *Screenshots show the actual frontend with synthetic demo data and simulated
-worker/file operations. Timings and memory readings are illustrative.*
+worker/file operations.*
 
 ## How it works
 
@@ -63,7 +60,7 @@ proposals without converting the image.
 Files are limited to **50 MiB** each, PDFs to **200 pages**, and JPEGs to
 **8000 pixels per side**. Password-protected PDFs have no password-entry flow.
 Long documents can exceed the model's context limit even within these file limits.
-OCR is configured for German and English; other languages are not a supported claim.
+OCR is configured for German and English. Other languages may work but aren't tested.
 
 ## Using the interface
 
@@ -79,8 +76,8 @@ OCR is configured for German and English; other languages are not a supported cl
   **Warnings/errors** filters rows needing attention. The Open button opens the
   original document in your system viewer. Edit a proposed name directly.
 - **Approve and rename:** Approve individual rows or use **Approve all**, then
-  **Rename approved**. Always check the result: AI/OCR can make mistakes even
-  without a warning.
+  **Rename approved**. Check the names before renaming; OCR and the model can
+  be wrong without a warning.
 
 ![Expanded invoice review showing extracted XML fields and run details](docs/images/review.png)
 
@@ -107,7 +104,7 @@ Undo. **Redo** is available for the latest undo in the current session.
 
 Downloads include quantized GGUF weights and tokenizer assets. No model is
 bundled or downloaded automatically. The app checks available disk space and
-system memory; these are compatibility thresholds, not performance guarantees.
+system memory. The memory floors are minimums, not speed guarantees.
 Both models use a 16K-token context. CPU execution is supported; GPU acceleration
 depends on the hardware and how the installed llama.cpp binding was built.
 
@@ -195,6 +192,13 @@ it, and signs the assembled bundle. Use this script instead of bare
 require you to right-click the app and choose Open on first launch.
 
 Linux packages currently omit the worker; use `cargo tauri dev` on Linux.
+
+## Why I built this
+
+I wanted to learn how to run open models on my own machine and how to build a
+desktop app instead of another website. My invoice folder needed tidying anyway.
+The [development story](docs/DEVELOPMENT_STORY.md) covers how it went, including
+the parts that took a second attempt.
 
 ## Licenses
 

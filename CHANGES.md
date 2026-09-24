@@ -1,5 +1,9 @@
 # Changelog
 
+## Version 1.2.11 (2026-09-24, claude opus-5.5)
+
+- Move the personal note to a new README section and simplify stiff wording
+
 ## Version 1.2.10 (2026-09-24, claude opus-5.5)
 
 - Enable the React Compiler lint rules and use httpx2 as the backend test client
