@@ -43,3 +43,6 @@ backend/models/
 
 # Temp folder
 _temp
+
+# Local Claude Code settings and session state
+.claude/

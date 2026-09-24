@@ -1,5 +1,9 @@
 # Changelog
 
+## Version 1.2.9 (2026-09-24, claude opus-5.5)
+
+- Ignore the local .claude/ directory
+
 ## Version 1.2.8 (2026-09-24, claude opus-5.5)
 
 - Replace pycountry with an inline ISO-4217 list and clarify release licensing
