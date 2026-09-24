@@ -42,27 +42,32 @@ export function useMemoryStatus(): UseMemoryStatusResult {
   }, []);
 
   const poll = useCallback(() => {
-    clearTimer();
-    const generation = ++generationRef.current;
-    void fetchMemorySnapshot()
-      .then((next) => {
-        if (generation !== generationRef.current) return;
-        setSnapshot(next);
-        setError(null);
-        setStale(false);
-        retryDelayRef.current = POLL_INTERVAL_MS;
-      })
-      .catch((err: unknown) => {
-        if (generation !== generationRef.current) return;
-        setError(errorMessage(err));
-        setStale(true);
-        retryDelayRef.current = Math.min(retryDelayRef.current * 2, MAX_RETRY_DELAY_MS);
-      })
-      .finally(() => {
-        if (generation !== generationRef.current) return;
-        if (!activeRef.current) return;
-        timerRef.current = setTimeout(poll, retryDelayRef.current);
-      });
+    // Reschedules through this local function rather than through poll
+    // itself, so the callback never references its own binding.
+    const pollOnce = () => {
+      clearTimer();
+      const generation = ++generationRef.current;
+      void fetchMemorySnapshot()
+        .then((next) => {
+          if (generation !== generationRef.current) return;
+          setSnapshot(next);
+          setError(null);
+          setStale(false);
+          retryDelayRef.current = POLL_INTERVAL_MS;
+        })
+        .catch((err: unknown) => {
+          if (generation !== generationRef.current) return;
+          setError(errorMessage(err));
+          setStale(true);
+          retryDelayRef.current = Math.min(retryDelayRef.current * 2, MAX_RETRY_DELAY_MS);
+        })
+        .finally(() => {
+          if (generation !== generationRef.current) return;
+          if (!activeRef.current) return;
+          timerRef.current = setTimeout(pollOnce, retryDelayRef.current);
+        });
+    };
+    pollOnce();
   }, [clearTimer]);
 
   useEffect(() => {

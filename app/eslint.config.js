@@ -18,10 +18,7 @@ export default tseslint.config(
       "react-refresh": reactRefresh,
     },
     rules: {
-      // Classic hook rules only; the plugin's React Compiler rules would
-      // need hook refactors first and stay off until then.
-      "react-hooks/rules-of-hooks": "error",
-      "react-hooks/exhaustive-deps": "warn",
+      ...reactHooks.configs.recommended.rules,
       ...reactRefresh.configs.vite.rules,
     },
   },

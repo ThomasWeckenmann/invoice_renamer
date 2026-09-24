@@ -101,9 +101,25 @@ export function useRenameTransaction(): UseRenameTransactionResult {
     }
   }, []);
 
+  // Initial load on mount. State is set only in the promise callback, and
+  // not after unmount; later refreshes go through refreshUndoableBatches.
   useEffect(() => {
-    void refreshUndoableBatches();
-  }, [refreshUndoableBatches]);
+    let active = true;
+    listRenameBatches()
+      .then((batches) => {
+        if (!active) {
+          return;
+        }
+        setUndoableBatches(batches);
+        setSelectedBatchIndex(0);
+      })
+      .catch(() => {
+        // Best-effort UI hint only; leave the empty initial state on failure.
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const renameApproved = useCallback(
     (items: BatchItem[]) => {

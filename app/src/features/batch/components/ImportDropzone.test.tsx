@@ -110,4 +110,71 @@ describe("ImportDropzone", () => {
     expect(imported[0].sourcePath).toBe("/invoices/dropped.pdf");
     expect(imported[1].sourcePath).toBe("/invoices/scan.jpg");
   });
+
+  it("hands a drop to the callback passed on the latest render", async () => {
+    type DragDropHandler = Parameters<ReturnType<typeof getCurrentWebview>["onDragDropEvent"]>[0];
+    let dragDropHandler: DragDropHandler | undefined;
+    const onDragDropEvent = vi.fn((handler: DragDropHandler) => {
+      dragDropHandler = handler;
+      return Promise.resolve(() => {});
+    });
+    mockedGetCurrentWebview.mockReturnValue({
+      onDragDropEvent,
+    } as unknown as ReturnType<typeof getCurrentWebview>);
+    mockedInvoke.mockResolvedValue(pdfBytes());
+    const firstCallback = vi.fn();
+    const latestCallback = vi.fn();
+
+    const { rerender } = render(
+      <ImportDropzone onFilesImported={firstCallback} onImportError={vi.fn()} />,
+    );
+    await waitFor(() => expect(dragDropHandler).toBeDefined());
+    rerender(<ImportDropzone onFilesImported={latestCallback} onImportError={vi.fn()} />);
+
+    dragDropHandler!({
+      event: "drag-drop",
+      id: 1,
+      payload: { type: "drop", paths: ["/invoices/dropped.pdf"], position: { x: 0, y: 0 } as never },
+    });
+
+    await waitFor(() => expect(latestCallback).toHaveBeenCalledTimes(1));
+    expect(firstCallback).not.toHaveBeenCalled();
+    expect(onDragDropEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it("hands a drop to the callback that is current once reading finishes", async () => {
+    type DragDropHandler = Parameters<ReturnType<typeof getCurrentWebview>["onDragDropEvent"]>[0];
+    let dragDropHandler: DragDropHandler | undefined;
+    mockedGetCurrentWebview.mockReturnValue({
+      onDragDropEvent: vi.fn((handler: DragDropHandler) => {
+        dragDropHandler = handler;
+        return Promise.resolve(() => {});
+      }),
+    } as unknown as ReturnType<typeof getCurrentWebview>);
+    let finishRead: (bytes: number[]) => void = () => {};
+    mockedInvoke.mockReturnValue(
+      new Promise((resolve) => {
+        finishRead = resolve;
+      }),
+    );
+    const firstCallback = vi.fn();
+    const latestCallback = vi.fn();
+
+    const { rerender } = render(
+      <ImportDropzone onFilesImported={firstCallback} onImportError={vi.fn()} />,
+    );
+    await waitFor(() => expect(dragDropHandler).toBeDefined());
+
+    dragDropHandler!({
+      event: "drag-drop",
+      id: 1,
+      payload: { type: "drop", paths: ["/invoices/dropped.pdf"], position: { x: 0, y: 0 } as never },
+    });
+    await waitFor(() => expect(mockedInvoke).toHaveBeenCalled());
+    rerender(<ImportDropzone onFilesImported={latestCallback} onImportError={vi.fn()} />);
+    finishRead(pdfBytes());
+
+    await waitFor(() => expect(latestCallback).toHaveBeenCalledTimes(1));
+    expect(firstCallback).not.toHaveBeenCalled();
+  });
 });

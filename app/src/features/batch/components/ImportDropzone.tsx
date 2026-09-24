@@ -3,7 +3,7 @@
  * paths, which the later rename step needs and a plain `<input type=file>`
  * cannot provide. */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useState } from "react";
 import { pickInvoiceFiles } from "../../../lib/tauri/dialog";
 import { subscribeToDragDrop } from "../../../lib/tauri/dragDrop";
 import { readPathAsFile } from "../../../lib/tauri/files";
@@ -36,21 +36,20 @@ async function importPaths(paths: string[]): Promise<ImportedFile[]> {
 
 export function ImportDropzone({ onFilesImported, onImportError }: ImportDropzoneProps) {
   const [isDragOver, setIsDragOver] = useState(false);
-  // Kept current via refs rather than as effect deps, so the drag-drop
-  // subscription is set up once on mount instead of churning on every
-  // render a caller passes a fresh callback identity.
-  const onFilesImportedRef = useRef(onFilesImported);
-  onFilesImportedRef.current = onFilesImported;
-  const onImportErrorRef = useRef(onImportError);
-  onImportErrorRef.current = onImportError;
+  // Effect events read the callback props at the moment they fire, so a drop
+  // reports to whichever callbacks are current once reading finishes, and the
+  // drag-drop subscription is set up once on mount instead of churning on
+  // every render a caller passes a fresh callback identity.
+  const reportImported = useEffectEvent((files: ImportedFile[]) => onFilesImported(files));
+  const reportImportError = useEffectEvent((message: string) => onImportError(message));
 
   useEffect(() => {
     const unlisten = subscribeToDragDrop({
       onHoverChange: setIsDragOver,
       onDrop: (paths) => {
         importPaths(paths)
-          .then((files) => onFilesImportedRef.current(files))
-          .catch((err: unknown) => onImportErrorRef.current(errorMessage(err)));
+          .then((files) => reportImported(files))
+          .catch((err: unknown) => reportImportError(errorMessage(err)));
       },
     });
     return () => {
@@ -61,8 +60,8 @@ export function ImportDropzone({ onFilesImported, onImportError }: ImportDropzon
   const handleBrowse = () => {
     pickInvoiceFiles()
       .then(importPaths)
-      .then(onFilesImportedRef.current)
-      .catch((err: unknown) => onImportErrorRef.current(errorMessage(err)));
+      .then(onFilesImported)
+      .catch((err: unknown) => onImportError(errorMessage(err)));
   };
 
   return (

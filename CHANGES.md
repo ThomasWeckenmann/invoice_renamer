@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 1.2.10 (2026-09-24, claude opus-5.5)
+
+- Enable the React Compiler lint rules and use httpx2 as the backend test client
+
+  Fixes all 10 hook findings via effect events, layout-synced refs, local
+  recursion in polling callbacks, and a guarded mount load of Undo batches.
+  The Granite default is now derived: removing Granite before picking a model
+  leaves no model selected instead of a stale, uninstalled selection.
+
 ## Version 1.2.9 (2026-09-24, claude opus-5.5)
 
 - Ignore the local .claude/ directory

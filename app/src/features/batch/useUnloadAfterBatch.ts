@@ -58,63 +58,73 @@ export function useUnloadAfterBatch(): UseUnloadAfterBatchResult {
   }, []);
 
   const requestUnload = useCallback(() => {
-    clearRetryTimer();
-    // Re-checked here, not just at the moment this call was scheduled - a
-    // scheduled busy-retry (or a manual retry click) can fire after a new
-    // submission started in the meantime. beginSubmission also cancels any
-    // pending retry timer, but this guard is what actually matters: it's
-    // the one check made at the instant the unload would really happen.
-    if (!mountedRef.current || outstanding.current.size > 0) {
-      return;
-    }
-    setUnloadError(null);
-    void unloadModel().catch((err: unknown) => {
-      if (!mountedRef.current) {
+    // Retries through this local function rather than through requestUnload
+    // itself, so the callback never references its own binding.
+    const attemptUnload = () => {
+      clearRetryTimer();
+      // Re-checked here, not just at the moment this call was scheduled - a
+      // scheduled busy-retry (or a manual retry click) can fire after a new
+      // submission started in the meantime. beginSubmission also cancels any
+      // pending retry timer, but this guard is what actually matters: it's
+      // the one check made at the instant the unload would really happen.
+      if (!mountedRef.current || outstanding.current.size > 0) {
         return;
       }
-      if (err instanceof ApiError && err.status === 409) {
-        // Something else started using the worker between the last tracked
-        // job settling and this call - if it's now tracked too, its own
-        // drain will retrigger this; otherwise fall back to a short retry.
-        if (outstanding.current.size === 0) {
-          retryTimer.current = setTimeout(requestUnload, BUSY_RETRY_DELAY_MS);
+      setUnloadError(null);
+      void unloadModel().catch((err: unknown) => {
+        if (!mountedRef.current) {
+          return;
         }
-        return;
-      }
-      setUnloadError(errorMessage(err));
-    });
+        if (err instanceof ApiError && err.status === 409) {
+          // Something else started using the worker between the last tracked
+          // job settling and this call - if it's now tracked too, its own
+          // drain will retrigger this; otherwise fall back to a short retry.
+          if (outstanding.current.size === 0) {
+            retryTimer.current = setTimeout(attemptUnload, BUSY_RETRY_DELAY_MS);
+          }
+          return;
+        }
+        setUnloadError(errorMessage(err));
+      });
+    };
+    attemptUnload();
   }, [clearRetryTimer]);
 
   const pollJob = useCallback(
     (jobId: string) => {
-      const timer = setTimeout(() => {
-        void fetchJob(jobId)
-          .then((job) => {
-            pollTimers.current.delete(jobId);
-            if (!mountedRef.current) {
-              return;
-            }
-            if (!TERMINAL_STATUSES.has(job.status)) {
-              pollJob(jobId);
-              return;
-            }
-            outstanding.current.delete(jobId);
-            if (outstanding.current.size === 0) {
-              requestUnload();
-            }
-          })
-          .catch(() => {
-            pollTimers.current.delete(jobId);
-            if (!mountedRef.current) {
-              return;
-            }
-            // A polling failure is not proof the backend job settled - keep
-            // it tracked and keep trying. The idle timeout is the fallback
-            // if this job's status can never be confirmed.
-            pollJob(jobId);
-          });
-      }, POLL_INTERVAL_MS);
-      pollTimers.current.set(jobId, timer);
+      // Recurses through this local function, not through pollJob itself,
+      // so the callback never references its own binding.
+      const schedulePoll = () => {
+        const timer = setTimeout(() => {
+          void fetchJob(jobId)
+            .then((job) => {
+              pollTimers.current.delete(jobId);
+              if (!mountedRef.current) {
+                return;
+              }
+              if (!TERMINAL_STATUSES.has(job.status)) {
+                schedulePoll();
+                return;
+              }
+              outstanding.current.delete(jobId);
+              if (outstanding.current.size === 0) {
+                requestUnload();
+              }
+            })
+            .catch(() => {
+              pollTimers.current.delete(jobId);
+              if (!mountedRef.current) {
+                return;
+              }
+              // A polling failure is not proof the backend job settled - keep
+              // it tracked and keep trying. The idle timeout is the fallback
+              // if this job's status can never be confirmed.
+              schedulePoll();
+            });
+        }, POLL_INTERVAL_MS);
+        pollTimers.current.set(jobId, timer);
+      };
+      schedulePoll();
     },
     [requestUnload],
   );

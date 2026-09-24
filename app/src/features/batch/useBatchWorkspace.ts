@@ -1,7 +1,7 @@
 /** Owns batch-workspace state: imported items, per-item analysis progress
  * (polled from the job API), filename edits, and approval. */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { cancelJob, fetchJob, submitAnalysis } from "../../lib/api/analyses";
 import { ApiError } from "../../lib/api/client";
 import type { AnalysisJobView, JobStatus } from "../../lib/api/types";
@@ -62,8 +62,12 @@ export interface UseBatchWorkspaceResult {
 
 export function useBatchWorkspace(): UseBatchWorkspaceResult {
   const [items, setItems] = useState<BatchItem[]>([]);
+  // Read by event-driven callbacks that must see the latest committed items
+  // without depending on them. Synced after commit, before any later event.
   const itemsRef = useRef(items);
-  itemsRef.current = items;
+  useLayoutEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
   const pollTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   // Per-id generation counter. Cancel, remove, and each fresh submit/rerun
   // bump an id's generation; a submit/poll chain captures the generation it
@@ -108,35 +112,40 @@ export function useBatchWorkspace(): UseBatchWorkspaceResult {
 
   const pollJob = useCallback(
     (id: string, jobId: string, generation: number) => {
-      const timer = setTimeout(() => {
-        void (async () => {
-          let job: AnalysisJobView;
-          try {
-            job = await fetchJob(jobId);
-          } catch (err) {
-            pollTimers.current.delete(id);
-            if (isCurrentGeneration(id, generation)) {
-              updateItem(id, { status: "failed", error: errorMessage(err) });
+      // Recurses through this local function, not through pollJob itself,
+      // so the callback never references its own binding.
+      const schedulePoll = () => {
+        const timer = setTimeout(() => {
+          void (async () => {
+            let job: AnalysisJobView;
+            try {
+              job = await fetchJob(jobId);
+            } catch (err) {
+              pollTimers.current.delete(id);
+              if (isCurrentGeneration(id, generation)) {
+                updateItem(id, { status: "failed", error: errorMessage(err) });
+              }
+              return;
             }
-            return;
-          }
-          pollTimers.current.delete(id);
-          if (!isCurrentGeneration(id, generation)) {
-            return;
-          }
-          const status = statusFromJob(job.status);
-          updateItem(id, {
-            status,
-            proposal: job.proposal,
-            metrics: job.metrics,
-            error: job.error,
-          });
-          if (status === "queued" || status === "running") {
-            pollJob(id, jobId, generation);
-          }
-        })();
-      }, POLL_INTERVAL_MS);
-      pollTimers.current.set(id, timer);
+            pollTimers.current.delete(id);
+            if (!isCurrentGeneration(id, generation)) {
+              return;
+            }
+            const status = statusFromJob(job.status);
+            updateItem(id, {
+              status,
+              proposal: job.proposal,
+              metrics: job.metrics,
+              error: job.error,
+            });
+            if (status === "queued" || status === "running") {
+              schedulePoll();
+            }
+          })();
+        }, POLL_INTERVAL_MS);
+        pollTimers.current.set(id, timer);
+      };
+      schedulePoll();
     },
     [isCurrentGeneration, updateItem],
   );

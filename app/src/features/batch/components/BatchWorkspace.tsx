@@ -1,7 +1,7 @@
 /** Top-level batch workspace: import, model selection, progress, review,
  * approval, and the final rename-and-Undo transaction. */
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import "./batch.css";
 import { itemHasIssue } from "../types";
 import { useBatchWorkspace } from "../useBatchWorkspace";
@@ -17,7 +17,8 @@ import { ModelSelector } from "./ModelSelector";
 import { UndoConfirmDialog } from "./UndoConfirmDialog";
 
 export function BatchWorkspace() {
-  const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
+  // Only an explicit user pick; the effective selection is derived below.
+  const [pickedModelId, setPickedModelId] = useState<string | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   // Global, not per-item: read fresh at the moment each analyze/re-run fires,
   // so toggling it and re-running an item picks up the new value immediately.
@@ -37,20 +38,14 @@ export function BatchWorkspace() {
 
   // Granite is the default pick when it's already installed, so a
   // returning user doesn't have to reselect a model every launch.
-  useEffect(() => {
-    if (selectedModelId !== null) {
-      return;
-    }
-    const granite = catalog.models.find(
+  const defaultModelId =
+    catalog.models.find(
       (model) =>
         model.entry.id.toLowerCase().includes("granite") &&
         model.status === "installed" &&
         model.compatible,
-    );
-    if (granite) {
-      setSelectedModelId(granite.entry.id);
-    }
-  }, [catalog.models, selectedModelId]);
+    )?.entry.id ?? null;
+  const selectedModelId = pickedModelId ?? defaultModelId;
 
   const selectedModel = catalog.models.find((model) => model.entry.id === selectedModelId);
   const canAnalyzeItem = selectedModel?.status === "installed";
@@ -146,7 +141,7 @@ export function BatchWorkspace() {
             loading={catalog.loading}
             error={catalog.error}
             selectedModelId={selectedModelId}
-            onSelect={setSelectedModelId}
+            onSelect={setPickedModelId}
             onDownload={(modelId) => void catalog.download(modelId)}
             onRemove={(modelId) => void catalog.remove(modelId)}
             onRefresh={() => void catalog.refresh()}

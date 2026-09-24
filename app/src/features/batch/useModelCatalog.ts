@@ -37,21 +37,26 @@ export function useModelCatalog(): UseModelCatalogResult {
     }
   }, []);
 
-  const refresh = useCallback(async () => {
-    clearPoll();
-    try {
-      const next = await fetchModels();
-      setModels(next);
-      setError(null);
-      downloadingRef.current = next.some((model) => model.status === "downloading");
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setLoading(false);
-    }
-    if (downloadingRef.current) {
-      pollTimerRef.current = setTimeout(() => void refresh(), POLL_INTERVAL_MS);
-    }
+  const refresh = useCallback(() => {
+    // Reschedules through this local function rather than through refresh
+    // itself, so the callback never references its own binding.
+    const refreshOnce = async (): Promise<void> => {
+      clearPoll();
+      try {
+        const next = await fetchModels();
+        setModels(next);
+        setError(null);
+        downloadingRef.current = next.some((model) => model.status === "downloading");
+      } catch (err) {
+        setError(errorMessage(err));
+      } finally {
+        setLoading(false);
+      }
+      if (downloadingRef.current) {
+        pollTimerRef.current = setTimeout(() => void refreshOnce(), POLL_INTERVAL_MS);
+      }
+    };
+    return refreshOnce();
   }, [clearPoll]);
 
   useEffect(() => {
