@@ -1,8 +1,10 @@
 # Add security and contribution guidance and automated checks
 
-Status: Blocks 1-2 written 2026-09-24 (no macOS CI job; clippy with
-`-D warnings`; SECURITY.md email fallback). CI not yet run on GitHub;
-Block 3 and the CI part of Block 4 pending.
+Status: completed 2026-09-24. `SECURITY.md` (GitHub private reporting, email
+fallback), `CONTRIBUTING.md`, and `.github/workflows/ci.yml` added; no macOS
+job; clippy runs with `-D warnings` (clean locally on macOS). First CI run
+green for backend, frontend, and Rust. The last local macOS GUI walkthrough
+predates this plan by a few commits; only docs and CI changed since.
 
 ## Goal
 
