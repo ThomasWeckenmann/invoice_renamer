@@ -15,7 +15,6 @@ dependencies = [
     "ocrmac>=1.0.1; sys_platform == 'darwin'",
     "pillow>=12.3.0",
     "psutil>=7.2.2",
-    "pycountry>=26.2.16",
     "pypdf>=6.18.1",
     "pypdfium2>=5.13.0",
     "pytesseract>=0.3.13",

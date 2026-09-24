@@ -201,15 +201,22 @@ Linux packages currently omit the worker; use `cargo tauri dev` on Linux.
 Invoice Renamer's own source code is licensed under the [MIT License](LICENSE).
 Copyright (c) 2026 Thomas Weckenmann.
 
-The [third-party notices](backend/THIRD-PARTY-LICENSES) include the following macOS OCR dependencies:
+This repository distributes source code only. Python, npm, and Rust dependencies
+and the models are downloaded by whoever builds and runs the app, under their
+own licenses, which are separate from the project's MIT license.
 
-| Dependency | License |
-| --- | --- |
-| ocrmac | MIT |
-| pyobjc-core | MIT |
-| pyobjc-framework-Vision | MIT |
-| click | BSD-3-Clause |
+A locally built app bundles many of these dependencies (the Python runtime and
+packages in the worker, Rust crates, the frontend bundle). If you redistribute
+a built app, including all required third-party notices is your responsibility.
+The [third-party notices](backend/THIRD-PARTY-LICENSES) shipped in the worker at
+`_internal/THIRD-PARTY-LICENSES` cover only the macOS OCR additions (ocrmac,
+pyobjc-core, pyobjc-framework-Vision, click); see the file for its libffi caveat.
 
-These notices are included in the packaged worker at `_internal/THIRD-PARTY-LICENSES`. They cover the macOS OCR additions, not every application dependency; see the notices for the separate libffi caveat.
+| Model | License | Source |
+| --- | --- | --- |
+| Granite 3.3 2B Instruct | Apache 2.0 | [ibm-granite/granite-3.3-2b-instruct-GGUF](https://huggingface.co/ibm-granite/granite-3.3-2b-instruct-GGUF) by IBM |
+| Qwen3 4B Instruct 2507 | Apache 2.0 | [unsloth/Qwen3-4B-Instruct-2507-GGUF](https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF), a quantization of [Qwen/Qwen3-4B-Instruct-2507](https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507) |
 
-The [model catalog](backend/src/invoice_renamer/models/gguf_catalog.py) records Apache 2.0 for both Granite 3.3 2B Instruct and Qwen3 4B Instruct 2507. Models are downloaded separately and are not bundled with the app. Qwen's download includes its upstream license. Dependency and model licenses are separate from the project's own MIT license.
+Models are downloaded from Hugging Face at pinned revisions and are not bundled
+with the app. Qwen's download includes its upstream `LICENSE` file; Granite's
+license is stated on its model card.

@@ -116,6 +116,9 @@ def test_reports_the_runtime_device_once_a_model_has_loaded(
         "load_installed",
         lambda entry, data_dir, *, device: _FakeExtractor(_VALID_MODEL_RESPONSE),
     )
+    # Pinned so the result doesn't depend on the host: Apple Silicon with a
+    # Metal-enabled llama.cpp build would otherwise select "gpu".
+    monkeypatch.setattr(analyses_routes, "select_device", lambda capabilities: "cpu")
 
     submitted = client.post(
         "/analyses",

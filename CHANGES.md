@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 1.2.8 (2026-09-24, claude opus-5.5)
+
+- Replace pycountry with an inline ISO-4217 list and clarify release licensing
+- bugfix: Pin the device in the /memory runtime-device test so it passes on Apple Silicon
+
+  Drops the only LGPL runtime dependency; accepted currency codes are unchanged.
+  README now states the repository is source-only, that redistributors of a built
+  app must supply full third-party notices, and links both models' sources.
+
 ## Version 1.2.7 (2026-09-24, claude opus-5.5)
 
 - Upgrade vitest to 5 and eslint to 10 and re-enable React hook lint rules
