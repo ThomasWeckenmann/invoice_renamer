@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 1.2.7 (2026-09-24, claude opus-5.5)
+
+- Upgrade vitest to 5 and eslint to 10 and re-enable React hook lint rules
+
+  Fixes the vitest advisory GHSA-82fw-gwwq-j7x9 (npm audit now clean). The old
+  react-hooks config spread was undefined in flat config, so no hook rules ran;
+  rules-of-hooks and exhaustive-deps are now set explicitly. The plugin's
+  React Compiler rules stay off (10 findings in existing hooks).
+
 ## Version 1.2.6 (2026-09-23, GPT-6, claude sonnet-5)
 
 - Add a detailed development story and link it from the README
