@@ -1,6 +1,6 @@
 # Invoice Renamer
 
-Turn invoice filenames into something you can find again. 
+Turn invoice filenames into something you can find again.
 
 Invoice Renamer is a macOS and Linux desktop app that reads German and English invoices locally, proposes descriptive names, and lets you review them before renaming.
 

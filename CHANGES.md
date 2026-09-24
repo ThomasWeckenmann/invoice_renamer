@@ -1,5 +1,9 @@
 # Changelog
 
+## Version 1.2.12 (2026-09-24, claude opus-5.5)
+
+- Add SECURITY.md, CONTRIBUTING.md, and a CI workflow for backend, frontend, and Rust checks
+
 ## Version 1.2.11 (2026-09-24, claude opus-5.5)
 
 - Move the personal note to a new README section and simplify stiff wording
